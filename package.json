@@ -1,0 +1,11 @@
+{
+  "name": "cde13",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "update-menu-cache": "node scripts/update-menu-cache.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}
