@@ -128,11 +128,11 @@ async function fetchBytes(url) {
 function extractMenus(html) {
   const imageUrls = uniqueMatches(
     html,
-    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/pdf2img\/menu-standard-du-[^"' <]+\/page-001\.jpg/g
+    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/pdf2img\/(?:menu-standard-du|menu-de-la-semaine-du)-[^"' <]+\/page-001\.jpg/g
   );
   const pdfUrls = uniqueMatches(
     html,
-    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/\d{4}\/\d{2}\/menu-standard-du-[^"' <]+\.pdf/g
+    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/\d{4}\/\d{2}\/(?:menu-standard-du|menu-de-la-semaine-du)-[^"' <]+\.pdf/g
   );
 
   return imageUrls
@@ -166,7 +166,7 @@ function buildMenuInfo(originalImageUrl, pdfUrls) {
 
 function parseMenuSlug(slug) {
   const normalized = normalizeText(slug);
-  let match = normalized.match(/^menu-standard-du-(\d{1,2})-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
+  let match = normalized.match(/^menu(?:-standard|-de-la-semaine)-du-(\d{1,2})-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
   if (match) {
     return buildParsedMenuSlug({
       startDay: Number(match[1]),
@@ -177,7 +177,7 @@ function parseMenuSlug(slug) {
     });
   }
 
-  match = normalized.match(/^menu-standard-du-(\d{1,2})-([a-z]+)-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
+  match = normalized.match(/^menu(?:-standard|-de-la-semaine)-du-(\d{1,2})-([a-z]+)-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
   if (!match) {
     return null;
   }
@@ -231,7 +231,7 @@ function uniqueMatches(text, regex) {
 }
 
 function hasMenuStandardImage(html) {
-  return /\/pdf2img\/menu-standard-du-[^/]+\/page-001\.jpg/.test(html);
+  return /\/pdf2img\/(?:menu-standard-du|menu-de-la-semaine-du)-[^/]+\/page-001\.jpg/.test(html);
 }
 
 function normalizeText(text) {
