@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = join(REPO_ROOT, 'dist', 'menu-cache');
@@ -28,6 +29,13 @@ const MONTHS = {
   novembre: 10,
   decembre: 11
 };
+const DAY_CROPS = [
+  { day: 'Lundi', slug: 'lundi', left: 0.06, top: 0.10, width: 0.39, height: 0.25 },
+  { day: 'Mardi', slug: 'mardi', left: 0.46, top: 0.10, width: 0.39, height: 0.25 },
+  { day: 'Mercredi', slug: 'mercredi', left: 0.06, top: 0.36, width: 0.39, height: 0.27 },
+  { day: 'Jeudi', slug: 'jeudi', left: 0.46, top: 0.36, width: 0.39, height: 0.27 },
+  { day: 'Vendredi', slug: 'vendredi', left: 0.06, top: 0.57, width: 0.39, height: 0.35 }
+];
 
 async function main() {
   await rm(OUT_DIR, { recursive: true, force: true });
@@ -46,6 +54,7 @@ async function main() {
     await writeFile(join(OUT_DIR, filename), imageBytes);
     menu.cachedImagePath = filename;
     menu.cachedImageUrl = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/${filename}` : filename;
+    menu.dayImageUrls = await writeDayCrops(menu, imageBytes);
   }
 
   await writeFile(join(OUT_DIR, 'menus.json'), JSON.stringify({
@@ -55,6 +64,33 @@ async function main() {
   }, null, 2) + '\n');
 
   console.log(`Generated ${menus.length} cached menu(s) in ${OUT_DIR}`);
+}
+
+async function writeDayCrops(menu, imageBytes) {
+  const image = sharp(imageBytes);
+  const metadata = await image.metadata();
+  const dayImageUrls = {};
+  const dayDir = `menus/${menu.mondayDate}`;
+  await mkdir(join(OUT_DIR, dayDir), { recursive: true });
+
+  for (const crop of DAY_CROPS) {
+    const filename = `${dayDir}/${crop.slug}.jpg`;
+    const region = {
+      left: Math.round(metadata.width * crop.left),
+      top: Math.round(metadata.height * crop.top),
+      width: Math.round(metadata.width * crop.width),
+      height: Math.round(metadata.height * crop.height)
+    };
+
+    await sharp(imageBytes)
+      .extract(region)
+      .jpeg({ quality: 92 })
+      .toFile(join(OUT_DIR, filename));
+
+    dayImageUrls[crop.day] = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/${filename}` : filename;
+  }
+
+  return dayImageUrls;
 }
 
 async function loadMenuHtml() {
