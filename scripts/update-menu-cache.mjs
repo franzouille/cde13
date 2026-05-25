@@ -301,14 +301,42 @@ async function writeDayArtifacts(mondayDate, imageBytes, worker) {
       .extract(region)
       .jpeg({ quality: 92 })
       .toBuffer();
+    const ocrBuffer = await preprocessCropForOcr(cropBuffer);
 
     await writeFile(join(OUT_DIR, filename), cropBuffer);
 
     dayImageUrls[crop.day] = buildPublicUrl(filename);
-    dayTexts[crop.day] = await recognizeDayText(worker, cropBuffer, crop.day);
+    dayTexts[crop.day] = await recognizeDayText(worker, ocrBuffer, crop.day);
   }
 
   return { dayImageUrls, dayTexts };
+}
+
+async function preprocessCropForOcr(cropBuffer) {
+  const image = sharp(cropBuffer);
+  const metadata = await image.metadata();
+  const width = metadata.width || 0;
+  const height = metadata.height || 0;
+  const trimmedRegion = {
+    left: Math.round(width * 0.015),
+    top: Math.round(height * 0.01),
+    width: Math.max(1, Math.round(width * 0.89)),
+    height: Math.max(1, Math.round(height * 0.97))
+  };
+
+  return image
+    .extract(trimmedRegion)
+    .resize({
+      width: Math.round(trimmedRegion.width * 1.35),
+      withoutEnlargement: false
+    })
+    .grayscale()
+    .normalize()
+    .linear(1.2, -(255 * 0.1))
+    .sharpen()
+    .threshold(182)
+    .png()
+    .toBuffer();
 }
 
 async function recognizeDayText(worker, cropBuffer, day) {
