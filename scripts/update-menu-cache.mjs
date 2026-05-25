@@ -30,11 +30,11 @@ const MONTHS = {
   decembre: 11
 };
 const DAY_CROPS = [
-  { day: 'Lundi', slug: 'lundi', left: 0.06, top: 0.17, width: 0.39, height: 0.22 },
-  { day: 'Mardi', slug: 'mardi', left: 0.46, top: 0.17, width: 0.39, height: 0.22 },
-  { day: 'Mercredi', slug: 'mercredi', left: 0.06, top: 0.425, width: 0.39, height: 0.24 },
-  { day: 'Jeudi', slug: 'jeudi', left: 0.46, top: 0.425, width: 0.39, height: 0.24 },
-  { day: 'Vendredi', slug: 'vendredi', left: 0.06, top: 0.66, width: 0.39, height: 0.24 }
+  { day: 'Lundi', slug: 'lundi', left: 123 / 1653, top: 395 / 2339, width: 596 / 1653, height: 571 / 2339 },
+  { day: 'Mardi', slug: 'mardi', left: 927 / 1653, top: 395 / 2339, width: 596 / 1653, height: 571 / 2339 },
+  { day: 'Mercredi', slug: 'mercredi', left: 123 / 1653, top: 1012 / 2339, width: 596 / 1653, height: 571 / 2339 },
+  { day: 'Jeudi', slug: 'jeudi', left: 927 / 1653, top: 1012 / 2339, width: 596 / 1653, height: 571 / 2339 },
+  { day: 'Vendredi', slug: 'vendredi', left: 123 / 1653, top: 1628 / 2339, width: 596 / 1653, height: 571 / 2339 }
 ];
 
 async function main() {
