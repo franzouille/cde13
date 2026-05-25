@@ -1,11 +1,13 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { createWorker } from 'tesseract.js';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = join(REPO_ROOT, 'dist', 'menu-cache');
 const MENUS_DIR = join(OUT_DIR, 'menus');
+const OCR_CACHE_DIR = join(REPO_ROOT, '.cache', 'tesseract');
 const SOURCE_PAGE_URL = 'https://caissedesecolesparis13.fr/menus-cde13/';
 const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=menus-cde13';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
@@ -29,6 +31,7 @@ const MONTHS = {
   novembre: 10,
   decembre: 11
 };
+
 const DAY_CROPS = [
   { day: 'Lundi', slug: 'lundi', left: 123 / 1653, top: 395 / 2339, width: 596 / 1653, height: 571 / 2339 },
   { day: 'Mardi', slug: 'mardi', left: 927 / 1653, top: 395 / 2339, width: 596 / 1653, height: 571 / 2339 },
@@ -38,6 +41,8 @@ const DAY_CROPS = [
 ];
 
 async function main() {
+  const previousMenus = await loadPreviousMenus();
+
   await rm(OUT_DIR, { recursive: true, force: true });
   await mkdir(MENUS_DIR, { recursive: true });
 
@@ -48,29 +53,239 @@ async function main() {
     throw new Error('No menu-standard image was found in the CDE13 page.');
   }
 
-  for (const menu of menus) {
-    const filename = `menus/${menu.mondayDate}.jpg`;
-    const imageBytes = await fetchBytes(menu.originalImageUrl);
-    await writeFile(join(OUT_DIR, filename), imageBytes);
-    menu.cachedImagePath = filename;
-    menu.cachedImageUrl = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/${filename}` : filename;
-    menu.dayImageUrls = await writeDayCrops(menu, imageBytes);
+  const previousMenusByDate = new Map(previousMenus.map(menu => [menu.mondayDate, menu]));
+  await mkdir(OCR_CACHE_DIR, { recursive: true });
+  const worker = await createWorker('fra', 1, {
+    cachePath: OCR_CACHE_DIR
+  });
+  const cachedMenus = [];
+
+  try {
+    for (const menu of menus) {
+      const previousMenu = previousMenusByDate.get(menu.mondayDate);
+      cachedMenus.push(await buildCachedMenu(menu, previousMenu, worker));
+    }
+  } finally {
+    await worker.terminate();
   }
 
   await writeFile(join(OUT_DIR, 'menus.json'), JSON.stringify({
     generatedAt: new Date().toISOString(),
     sourcePageUrl: SOURCE_PAGE_URL,
-    menus
+    menus: cachedMenus
   }, null, 2) + '\n');
 
-  console.log(`Generated ${menus.length} cached menu(s) in ${OUT_DIR}`);
+  console.log(`Generated ${cachedMenus.length} cached menu(s) in ${OUT_DIR}`);
 }
 
-async function writeDayCrops(menu, imageBytes) {
+async function loadPreviousMenus() {
+  const publicMenus = await loadPreviousMenusFromPublicCache();
+  if (publicMenus.length) {
+    return publicMenus;
+  }
+
+  return loadPreviousMenusFromLocalCache();
+}
+
+async function loadPreviousMenusFromPublicCache() {
+  if (!PUBLIC_BASE_URL) {
+    return [];
+  }
+
+  const cacheUrl = buildPublicUrl('menus.json');
+
+  try {
+    const response = await fetch(cacheUrl, { headers: FETCH_HEADERS, redirect: 'follow' });
+    if (!response.ok) {
+      console.warn(`Previous public cache ${cacheUrl} returned HTTP ${response.status}`);
+      return [];
+    }
+
+    const payload = JSON.parse(await response.text());
+    return Array.isArray(payload?.menus) ? payload.menus : [];
+  } catch (error) {
+    console.warn(`Previous public cache ${cacheUrl} failed: ${error.message}`);
+    return [];
+  }
+}
+
+async function loadPreviousMenusFromLocalCache() {
+  const localCachePath = join(OUT_DIR, 'menus.json');
+
+  try {
+    await access(localCachePath);
+  } catch {
+    return [];
+  }
+
+  try {
+    const payload = JSON.parse(await readFile(localCachePath, 'utf8'));
+    const menus = Array.isArray(payload?.menus) ? payload.menus : [];
+    return Promise.all(menus.map(enrichMenuWithLocalAssets));
+  } catch (error) {
+    console.warn(`Previous local cache ${localCachePath} failed: ${error.message}`);
+    return [];
+  }
+}
+
+async function enrichMenuWithLocalAssets(menu) {
+  return {
+    ...menu,
+    _localAssets: {
+      cachedImageBytes: await tryReadLocalAsset(menu.cachedImagePath),
+      dayImageBytes: await readLocalDayAssets(menu.dayImageUrls)
+    }
+  };
+}
+
+async function readLocalDayAssets(dayImageUrls) {
+  const assets = {};
+  for (const crop of DAY_CROPS) {
+    const relativePath = extractRelativeAssetPath(dayImageUrls?.[crop.day]) || buildDayCropPathFromDayUrl(dayImageUrls?.[crop.day]);
+    assets[crop.day] = await tryReadLocalAsset(relativePath);
+  }
+  return assets;
+}
+
+async function buildCachedMenu(menu, previousMenu, worker) {
+  if (canReuseMenu(previousMenu, menu)) {
+    try {
+      await restoreMenuAssets(previousMenu, menu.mondayDate);
+      return buildReusedMenuEntry(menu, previousMenu);
+    } catch (error) {
+      console.warn(`Unable to restore cached assets for ${menu.mondayDate}: ${error.message}`);
+    }
+  }
+
+  return generateMenuEntry(menu, worker);
+}
+
+function canReuseMenu(previousMenu, menu) {
+  return Boolean(
+    previousMenu &&
+    previousMenu.originalImageUrl === menu.originalImageUrl &&
+    hasCompleteDayTexts(previousMenu.dayTexts) &&
+    hasCompleteDayImageUrls(previousMenu.dayImageUrls) &&
+    previousMenu.cachedImageUrl
+  );
+}
+
+function hasCompleteDayTexts(dayTexts) {
+  return DAY_CROPS.every(crop => typeof dayTexts?.[crop.day] === 'string' && dayTexts[crop.day].trim());
+}
+
+function hasCompleteDayImageUrls(dayImageUrls) {
+  return DAY_CROPS.every(crop => typeof dayImageUrls?.[crop.day] === 'string' && dayImageUrls[crop.day].trim());
+}
+
+async function restoreMenuAssets(previousMenu, mondayDate) {
+  const cachedImagePath = buildCachedImagePath(mondayDate);
+  await writeAssetFromSource(previousMenu.cachedImageUrl, previousMenu.cachedImagePath, previousMenu._localAssets?.cachedImageBytes, cachedImagePath);
+
+  for (const crop of DAY_CROPS) {
+    const relativePath = buildDayCropPath(mondayDate, crop.slug);
+    await writeAssetFromSource(previousMenu.dayImageUrls[crop.day], relativePath, previousMenu._localAssets?.dayImageBytes?.[crop.day], relativePath);
+  }
+}
+
+async function writeAssetFromSource(url, fallbackPath, cachedBytes, relativeOutputPath) {
+  let bytes = cachedBytes || null;
+
+  if (!bytes && url && /^https?:\/\//.test(url)) {
+    bytes = await tryFetchBytes(url);
+  }
+
+  if (!bytes && fallbackPath && !PUBLIC_BASE_URL) {
+    bytes = await tryReadLocalAsset(fallbackPath);
+  }
+
+  if (!bytes) {
+    throw new Error(`Asset unavailable for ${relativeOutputPath}`);
+  }
+
+  const outputPath = join(OUT_DIR, relativeOutputPath);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, bytes);
+}
+
+async function tryFetchBytes(url) {
+  try {
+    const response = await fetch(url, { headers: FETCH_HEADERS, redirect: 'follow' });
+    if (!response.ok) {
+      return null;
+    }
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function tryReadLocalAsset(relativePath) {
+  if (!relativePath) {
+    return null;
+  }
+
+  const localPath = join(OUT_DIR, relativePath);
+  try {
+    return await readFile(localPath);
+  } catch {
+    return null;
+  }
+}
+
+function extractRelativeAssetPath(url) {
+  if (!url || /^https?:\/\//.test(url)) {
+    return null;
+  }
+  return String(url).replace(/^\//, '');
+}
+
+function buildDayCropPathFromDayUrl(url) {
+  return extractRelativeAssetPath(url);
+}
+
+function buildReusedMenuEntry(menu, previousMenu) {
+  return {
+    weekLabel: menu.weekLabel,
+    mondayDate: menu.mondayDate,
+    pdfUrl: menu.pdfUrl,
+    originalImageUrl: menu.originalImageUrl,
+    cachedImagePath: buildCachedImagePath(menu.mondayDate),
+    cachedImageUrl: buildPublicUrl(buildCachedImagePath(menu.mondayDate)),
+    dayImageUrls: buildDayImageUrls(menu.mondayDate),
+    dayTexts: normalizeDayTexts(previousMenu.dayTexts),
+    ocrEngine: previousMenu.ocrEngine || 'tesseract-fra',
+    ocrGeneratedAt: previousMenu.ocrGeneratedAt || new Date().toISOString()
+  };
+}
+
+async function generateMenuEntry(menu, worker) {
+  const imageBytes = await fetchBytes(menu.originalImageUrl);
+  const cachedImagePath = buildCachedImagePath(menu.mondayDate);
+  await writeFile(join(OUT_DIR, cachedImagePath), imageBytes);
+
+  const dayArtifacts = await writeDayArtifacts(menu.mondayDate, imageBytes, worker);
+
+  return {
+    weekLabel: menu.weekLabel,
+    mondayDate: menu.mondayDate,
+    pdfUrl: menu.pdfUrl,
+    originalImageUrl: menu.originalImageUrl,
+    cachedImagePath,
+    cachedImageUrl: buildPublicUrl(cachedImagePath),
+    dayImageUrls: dayArtifacts.dayImageUrls,
+    dayTexts: dayArtifacts.dayTexts,
+    ocrEngine: 'tesseract-fra',
+    ocrGeneratedAt: new Date().toISOString()
+  };
+}
+
+async function writeDayArtifacts(mondayDate, imageBytes, worker) {
   const image = sharp(imageBytes);
   const metadata = await image.metadata();
   const dayImageUrls = {};
-  const dayDir = `menus/${menu.mondayDate}`;
+  const dayTexts = {};
+  const dayDir = `menus/${mondayDate}`;
   await mkdir(join(OUT_DIR, dayDir), { recursive: true });
 
   for (const crop of DAY_CROPS) {
@@ -82,15 +297,79 @@ async function writeDayCrops(menu, imageBytes) {
       height: Math.round(metadata.height * crop.height)
     };
 
-    await sharp(imageBytes)
+    const cropBuffer = await sharp(imageBytes)
       .extract(region)
       .jpeg({ quality: 92 })
-      .toFile(join(OUT_DIR, filename));
+      .toBuffer();
 
-    dayImageUrls[crop.day] = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/${filename}` : filename;
+    await writeFile(join(OUT_DIR, filename), cropBuffer);
+
+    dayImageUrls[crop.day] = buildPublicUrl(filename);
+    dayTexts[crop.day] = await recognizeDayText(worker, cropBuffer, crop.day);
   }
 
-  return dayImageUrls;
+  return { dayImageUrls, dayTexts };
+}
+
+async function recognizeDayText(worker, cropBuffer, day) {
+  const {
+    data: { text }
+  } = await worker.recognize(cropBuffer);
+
+  return ensureDayPrefix(normalizeOcrText(text), day);
+}
+
+function normalizeOcrText(text) {
+  return String(text || '')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizeDayTexts(dayTexts) {
+  const normalized = {};
+  for (const crop of DAY_CROPS) {
+    normalized[crop.day] = ensureDayPrefix(normalizeOcrText(dayTexts?.[crop.day] || ''), crop.day);
+  }
+  return normalized;
+}
+
+function ensureDayPrefix(text, day) {
+  const cleaned = normalizeOcrText(text);
+  if (!cleaned) {
+    return day;
+  }
+
+  if (normalizeText(cleaned).startsWith(normalizeText(day))) {
+    return cleaned;
+  }
+
+  return `${day}\n${cleaned}`;
+}
+
+function buildCachedImagePath(mondayDate) {
+  return `menus/${mondayDate}.jpg`;
+}
+
+function buildDayCropPath(mondayDate, slug) {
+  return `menus/${mondayDate}/${slug}.jpg`;
+}
+
+function buildDayImageUrls(mondayDate) {
+  const urls = {};
+  for (const crop of DAY_CROPS) {
+    urls[crop.day] = buildPublicUrl(buildDayCropPath(mondayDate, crop.slug));
+  }
+  return urls;
+}
+
+function buildPublicUrl(relativePath) {
+  const normalizedPath = relativePath.replace(/^\//, '');
+  if (!PUBLIC_BASE_URL) {
+    return normalizedPath;
+  }
+  return `${PUBLIC_BASE_URL.replace(/\/$/, '')}/${normalizedPath}`;
 }
 
 async function loadMenuHtml() {

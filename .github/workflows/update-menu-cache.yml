@@ -41,6 +41,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
+      - name: Restore Tesseract OCR cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/tesseract
+          key: ${{ runner.os }}-tesseract-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright browser
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
