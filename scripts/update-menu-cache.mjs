@@ -42,7 +42,7 @@ async function main() {
   await mkdir(MENUS_DIR, { recursive: true });
 
   const html = await loadMenuHtml();
-  const menus = extractMenus(html);
+  const menus = extractMenus(html).slice(-5);
 
   if (!menus.length) {
     throw new Error('No menu-standard image was found in the CDE13 page.');
