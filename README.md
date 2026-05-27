@@ -2,11 +2,18 @@
 
 Cache public GitHub Pages pour les menus de la Caisse des ecoles du 13e arrondissement de Paris.
 
-Le workflow GitHub Actions recupere les menus publics CDE13, copie les images `menu-standard-du-*`, puis publie :
+Ce repo porte l'automatisation de recuperation, crop, OCR et publication du cache public.
+
+Le workflow GitHub Actions recupere les menus publics CDE13, copie les images `menu-standard-du-*`, genere les crops par jour, OCRise ces crops, puis publie :
 
 ```text
 menus.json
 menus/YYYY-MM-DD.jpg
+menus/YYYY-MM-DD/lundi.jpg
+menus/YYYY-MM-DD/mardi.jpg
+menus/YYYY-MM-DD/mercredi.jpg
+menus/YYYY-MM-DD/jeudi.jpg
+menus/YYYY-MM-DD/vendredi.jpg
 ```
 
 URL cible :
@@ -15,11 +22,39 @@ URL cible :
 https://franzouille.github.io/cde13/menus.json
 ```
 
-## Commandes
+## Lancer en local
+
+Prerequis :
+
+- Node.js
+- npm
+
+Installation :
 
 ```sh
 npm install
+```
+
+Generation locale du cache :
+
+```sh
 PUBLIC_BASE_URL='https://franzouille.github.io/cde13/' npm run update-menu-cache
 ```
 
-Le dossier `dist/` est genere localement et ignore par Git.
+Resultat attendu :
+
+- generation de `dist/menu-cache/menus.json`
+- generation des images sources dans `dist/menu-cache/menus/`
+- generation des crops jour par jour dans `dist/menu-cache/menus/YYYY-MM-DD/`
+- presence de `dayTexts` OCRises dans `menus.json`
+
+Notes :
+
+- `PUBLIC_BASE_URL` sert a fabriquer les URLs publiques dans `menus.json`.
+- En local, le script essaie d'abord de reutiliser le `menus.json` public existant pour eviter de retraiter les menus inchanges.
+- Le dossier `dist/` est genere localement et ignore par Git.
+- Le dossier `.cache/tesseract/` contient le cache OCR local et est ignore par Git.
+
+## GitHub Actions
+
+Le workflow GitHub Actions fait la meme chose que le run local, puis publie `dist/menu-cache` sur GitHub Pages.
