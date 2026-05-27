@@ -11,6 +11,7 @@ const OCR_CACHE_DIR = join(REPO_ROOT, '.cache', 'tesseract');
 const SOURCE_PAGE_URL = 'https://caissedesecolesparis13.fr/menus-cde13/';
 const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=menus-cde13';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
+const FORCE_REGEN_WEEK = process.env.FORCE_REGEN_WEEK || '';
 const FETCH_HEADERS = {
   'user-agent': 'Mozilla/5.0 (compatible; cde13-cache/1.0)',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
@@ -172,6 +173,10 @@ async function buildCachedMenu(menu, previousMenu, worker) {
 }
 
 function canReuseMenu(previousMenu, menu) {
+  if (FORCE_REGEN_WEEK && menu.mondayDate === FORCE_REGEN_WEEK) {
+    return false;
+  }
+
   return Boolean(
     previousMenu &&
     previousMenu.originalImageUrl === menu.originalImageUrl &&
