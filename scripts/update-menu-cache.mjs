@@ -141,7 +141,7 @@ async function enrichMenuWithLocalAssets(menu) {
 async function readLocalDayAssets(dayImageUrls) {
   const assets = {};
   for (const crop of DAY_CROPS) {
-    const relativePath = extractRelativeAssetPath(dayImageUrls?.[crop.day]) || buildDayCropPathFromDayUrl(dayImageUrls?.[crop.day]);
+    const relativePath = extractRelativeAssetPath(dayImageUrls?.[crop.day]);
     assets[crop.day] = await tryReadLocalAsset(relativePath);
   }
   return assets;
@@ -151,7 +151,18 @@ async function buildCachedMenu(menu, previousMenu, worker) {
   if (canReuseMenu(previousMenu, menu)) {
     try {
       await restoreMenuAssets(previousMenu, menu.mondayDate);
-      return buildReusedMenuEntry(menu, previousMenu);
+      return {
+        weekLabel: menu.weekLabel,
+        mondayDate: menu.mondayDate,
+        pdfUrl: menu.pdfUrl,
+        originalImageUrl: menu.originalImageUrl,
+        cachedImagePath: buildCachedImagePath(menu.mondayDate),
+        cachedImageUrl: buildPublicUrl(buildCachedImagePath(menu.mondayDate)),
+        dayImageUrls: buildDayImageUrls(menu.mondayDate),
+        dayTexts: normalizeDayTexts(previousMenu.dayTexts),
+        ocrEngine: previousMenu.ocrEngine || 'tesseract-fra',
+        ocrGeneratedAt: previousMenu.ocrGeneratedAt || new Date().toISOString()
+      };
     } catch (error) {
       console.warn(`Unable to restore cached assets for ${menu.mondayDate}: ${error.message}`);
     }
@@ -164,18 +175,14 @@ function canReuseMenu(previousMenu, menu) {
   return Boolean(
     previousMenu &&
     previousMenu.originalImageUrl === menu.originalImageUrl &&
-    hasCompleteDayTexts(previousMenu.dayTexts) &&
-    hasCompleteDayImageUrls(previousMenu.dayImageUrls) &&
+    hasCompleteDayValues(previousMenu.dayTexts) &&
+    hasCompleteDayValues(previousMenu.dayImageUrls) &&
     previousMenu.cachedImageUrl
   );
 }
 
-function hasCompleteDayTexts(dayTexts) {
-  return DAY_CROPS.every(crop => typeof dayTexts?.[crop.day] === 'string' && dayTexts[crop.day].trim());
-}
-
-function hasCompleteDayImageUrls(dayImageUrls) {
-  return DAY_CROPS.every(crop => typeof dayImageUrls?.[crop.day] === 'string' && dayImageUrls[crop.day].trim());
+function hasCompleteDayValues(values) {
+  return DAY_CROPS.every(crop => typeof values?.[crop.day] === 'string' && values[crop.day].trim());
 }
 
 async function restoreMenuAssets(previousMenu, mondayDate) {
@@ -238,25 +245,6 @@ function extractRelativeAssetPath(url) {
     return null;
   }
   return String(url).replace(/^\//, '');
-}
-
-function buildDayCropPathFromDayUrl(url) {
-  return extractRelativeAssetPath(url);
-}
-
-function buildReusedMenuEntry(menu, previousMenu) {
-  return {
-    weekLabel: menu.weekLabel,
-    mondayDate: menu.mondayDate,
-    pdfUrl: menu.pdfUrl,
-    originalImageUrl: menu.originalImageUrl,
-    cachedImagePath: buildCachedImagePath(menu.mondayDate),
-    cachedImageUrl: buildPublicUrl(buildCachedImagePath(menu.mondayDate)),
-    dayImageUrls: buildDayImageUrls(menu.mondayDate),
-    dayTexts: normalizeDayTexts(previousMenu.dayTexts),
-    ocrEngine: previousMenu.ocrEngine || 'tesseract-fra',
-    ocrGeneratedAt: previousMenu.ocrGeneratedAt || new Date().toISOString()
-  };
 }
 
 async function generateMenuEntry(menu, worker) {
@@ -365,7 +353,7 @@ function normalizeOcrText(text) {
     .trim();
 }
 
-function buildFilteredTextFromTsv(tsv, imageBuffer) {
+async function buildFilteredTextFromTsv(tsv, imageBuffer) {
   if (!tsv) {
     return '';
   }
@@ -375,31 +363,30 @@ function buildFilteredTextFromTsv(tsv, imageBuffer) {
     return '';
   }
 
-  return sharp(imageBuffer).metadata().then(metadata => {
-    const imageWidth = metadata.width || 0;
-    const linesByKey = new Map();
+  const metadata = await sharp(imageBuffer).metadata();
+  const imageWidth = metadata.width || 0;
+  const linesByKey = new Map();
 
-    for (const row of rows) {
-      if (row.level !== 5 || !row.text) {
-        continue;
-      }
-
-      const key = `${row.page_num}:${row.block_num}:${row.par_num}:${row.line_num}`;
-      if (!linesByKey.has(key)) {
-        linesByKey.set(key, []);
-      }
-      linesByKey.get(key).push(row);
+  for (const row of rows) {
+    if (row.level !== 5 || !row.text) {
+      continue;
     }
 
-    const lines = [...linesByKey.values()]
-      .map(words => words.sort((a, b) => a.left - b.left))
-      .map(words => filterLineWords(words, imageWidth))
-      .filter(words => words.length)
-      .map(words => words.map(word => word.text).join(' ').replace(/\s+([,.)])/g, '$1'))
-      .filter(Boolean);
+    const key = `${row.page_num}:${row.block_num}:${row.par_num}:${row.line_num}`;
+    if (!linesByKey.has(key)) {
+      linesByKey.set(key, []);
+    }
+    linesByKey.get(key).push(row);
+  }
 
-    return lines.join('\n');
-  });
+  const lines = [...linesByKey.values()]
+    .map(words => words.sort((a, b) => a.left - b.left))
+    .map(words => filterLineWords(words, imageWidth))
+    .filter(words => words.length)
+    .map(words => words.map(word => word.text).join(' ').replace(/\s+([,.)])/g, '$1'))
+    .filter(Boolean);
+
+  return lines.join('\n');
 }
 
 function parseTsvRows(tsv) {
