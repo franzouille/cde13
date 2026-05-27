@@ -347,7 +347,7 @@ async function recognizeDayText(worker, cropBuffer, day) {
   } = await worker.recognize(cropBuffer, {}, { tsv: true });
 
   const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
-  return ensureDayPrefix(normalizeOcrText(structuredText || text), day);
+  return ensureDayPrefix(cleanupOcrText(structuredText || text), day);
 }
 
 function normalizeOcrText(text) {
@@ -355,6 +355,25 @@ function normalizeOcrText(text) {
     .replace(/\r/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function cleanupOcrText(text) {
+  return normalizeOcrText(text)
+    .split('\n')
+    .map(cleanupOcrLine)
+    .filter(Boolean)
+    .join('\n');
+}
+
+function cleanupOcrLine(line) {
+  return normalizeOcrText(line)
+    .replace(/^[`'‘’"“”]+(?=\p{L})/gu, '')
+    .replace(/\b[bBdD][iIl1][oO0]\b/g, 'bio')
+    .replace(/([\p{L}])bio\b/gu, '$1 bio')
+    .replace(/\s+(?:[|©€¢£¥§]+|[()[\]{}<>\\/|&*#]+)(?=\s|$)/gu, '')
+    .replace(/\s+[^\p{L}\p{N}]+$/gu, '')
+    .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
