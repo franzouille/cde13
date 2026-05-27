@@ -317,17 +317,26 @@ async function preprocessCropForOcr(cropBuffer) {
   const metadata = await image.metadata();
   const width = metadata.width || 0;
   const height = metadata.height || 0;
-  const trimmedRegion = {
-    left: Math.round(width * 0.015),
-    top: Math.round(height * 0.01),
-    width: Math.max(1, Math.round(width * 0.89)),
-    height: Math.max(1, Math.round(height * 0.97))
-  };
+  const headerY = Math.min(height, 108);
+  const maskWidth = Math.min(width, 50);
+  const masked = await image
+    .composite([{
+      input: {
+        create: {
+          width: maskWidth,
+          height: Math.max(1, height - headerY),
+          channels: 3,
+          background: { r: 255, g: 255, b: 255 }
+        }
+      },
+      left: Math.max(0, width - maskWidth),
+      top: headerY
+    }])
+    .toBuffer();
 
-  return image
-    .extract(trimmedRegion)
+  return sharp(masked)
     .resize({
-      width: Math.round(trimmedRegion.width * 1.35),
+      width: Math.round(width * 1.35),
       withoutEnlargement: false
     })
     .grayscale()
@@ -341,10 +350,11 @@ async function preprocessCropForOcr(cropBuffer) {
 
 async function recognizeDayText(worker, cropBuffer, day) {
   const {
-    data: { text }
-  } = await worker.recognize(cropBuffer);
+    data: { text, tsv }
+  } = await worker.recognize(cropBuffer, {}, { tsv: true });
 
-  return ensureDayPrefix(normalizeOcrText(text), day);
+  const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
+  return ensureDayPrefix(normalizeOcrText(structuredText || text), day);
 }
 
 function normalizeOcrText(text) {
@@ -353,6 +363,92 @@ function normalizeOcrText(text) {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function buildFilteredTextFromTsv(tsv, imageBuffer) {
+  if (!tsv) {
+    return '';
+  }
+
+  const rows = parseTsvRows(tsv);
+  if (!rows.length) {
+    return '';
+  }
+
+  return sharp(imageBuffer).metadata().then(metadata => {
+    const imageWidth = metadata.width || 0;
+    const linesByKey = new Map();
+
+    for (const row of rows) {
+      if (row.level !== 5 || !row.text) {
+        continue;
+      }
+
+      const key = `${row.page_num}:${row.block_num}:${row.par_num}:${row.line_num}`;
+      if (!linesByKey.has(key)) {
+        linesByKey.set(key, []);
+      }
+      linesByKey.get(key).push(row);
+    }
+
+    const lines = [...linesByKey.values()]
+      .map(words => words.sort((a, b) => a.left - b.left))
+      .map(words => filterLineWords(words, imageWidth))
+      .filter(words => words.length)
+      .map(words => words.map(word => word.text).join(' ').replace(/\s+([,.)])/g, '$1'))
+      .filter(Boolean);
+
+    return lines.join('\n');
+  });
+}
+
+function parseTsvRows(tsv) {
+  return tsv
+    .trim()
+    .split('\n')
+    .map(line => line.split('\t'))
+    .filter(columns => columns.length >= 12)
+    .map(columns => ({
+      level: Number(columns[0]),
+      page_num: Number(columns[1]),
+      block_num: Number(columns[2]),
+      par_num: Number(columns[3]),
+      line_num: Number(columns[4]),
+      word_num: Number(columns[5]),
+      left: Number(columns[6]),
+      top: Number(columns[7]),
+      width: Number(columns[8]),
+      height: Number(columns[9]),
+      conf: Number(columns[10]),
+      text: String(columns[11] || '').trim()
+    }));
+}
+
+function filterLineWords(words, imageWidth) {
+  const lineHeight = Math.max(...words.map(word => word.height || 0), 0);
+
+  return words.filter(word => !isLikelyRightMarginNoise(word, imageWidth, lineHeight));
+}
+
+function isLikelyRightMarginNoise(word, imageWidth, lineHeight) {
+  const text = String(word.text || '').trim();
+  if (!text) {
+    return true;
+  }
+
+  const rightSide = imageWidth > 0 && word.left >= imageWidth * 0.84;
+  const tinyToken = /^[A-Za-zÀ-ÿ0-9|&€#]{1,3}$/.test(text);
+  const lowConfidence = word.conf >= 0 && word.conf < 75;
+  const shortHeight = lineHeight > 0 && word.height < lineHeight * 0.75;
+  const narrowWord = imageWidth > 0 && word.width < imageWidth * 0.12;
+  const suspiciousTinyToken = tinyToken && !isAllowedShortWord(text) && /[A-Z0-9|&€#]/.test(text);
+
+  return rightSide && narrowWord && (suspiciousTinyToken || lowConfidence || shortHeight);
+}
+
+function isAllowedShortWord(text) {
+  const normalized = normalizeOcrText(text).toLowerCase();
+  return normalized === 'de' || normalized === 'du' || normalized === 'des' || normalized === 'au' || normalized === 'aux' || normalized === 'et';
 }
 
 function normalizeDayTexts(dayTexts) {
