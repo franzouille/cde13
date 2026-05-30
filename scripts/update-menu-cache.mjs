@@ -8,6 +8,7 @@ const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = join(REPO_ROOT, 'dist', 'menu-cache');
 const MENUS_DIR = join(OUT_DIR, 'menus');
 const OCR_CACHE_DIR = join(REPO_ROOT, '.cache', 'tesseract');
+const LEXICON_PATH = join(REPO_ROOT, 'data', 'canteen_lexicon.json');
 const SOURCE_PAGE_URL = 'https://caissedesecolesparis13.fr/menus-cde13/';
 const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=menus-cde13';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
@@ -41,7 +42,11 @@ const DAY_CROPS = [
   { day: 'Vendredi', slug: 'vendredi', left: 123 / 1653, top: 1628 / 2339, width: 596 / 1653, height: 571 / 2339 }
 ];
 
+let LEXICON_WORDS = [];
+let LEXICON_BY_NORMALIZED = new Map();
+
 async function main() {
+  await loadLexicon();
   const previousMenus = await loadPreviousMenus();
 
   await rm(OUT_DIR, { recursive: true, force: true });
@@ -77,6 +82,37 @@ async function main() {
   }, null, 2) + '\n');
 
   console.log(`Generated ${cachedMenus.length} cached menu(s) in ${OUT_DIR}`);
+}
+
+async function loadLexicon() {
+  const payload = JSON.parse(await readFile(LEXICON_PATH, 'utf8'));
+  LEXICON_WORDS = Array.isArray(payload?.words) ? payload.words : [];
+  LEXICON_BY_NORMALIZED = new Map();
+
+  for (const word of LEXICON_WORDS) {
+    const normalized = normalizeLexiconWord(word);
+    if (!normalized) {
+      continue;
+    }
+
+    const current = LEXICON_BY_NORMALIZED.get(normalized);
+    if (!current || prefersWordForm(word, current)) {
+      LEXICON_BY_NORMALIZED.set(normalized, word);
+    }
+  }
+}
+
+function prefersWordForm(nextWord, currentWord) {
+  const nextHasAccent = hasDiacritic(nextWord);
+  const currentHasAccent = hasDiacritic(currentWord);
+  if (nextHasAccent !== currentHasAccent) {
+    return nextHasAccent;
+  }
+  return nextWord < currentWord;
+}
+
+function hasDiacritic(text) {
+  return [...String(text || '').normalize('NFD')].some(char => /[\u0300-\u036f]/.test(char));
 }
 
 async function loadPreviousMenus() {
@@ -367,14 +403,153 @@ function cleanupOcrText(text) {
 }
 
 function cleanupOcrLine(line) {
-  return normalizeOcrText(line)
+  return correctOcrWords(
+    normalizeOcrText(line)
     .replace(/^[`'‘’"“”]+(?=\p{L})/gu, '')
     .replace(/\b[bBdD][iIl1][oO0]\b/g, 'bio')
     .replace(/([\p{L}])bio\b/gu, '$1 bio')
     .replace(/\s+(?:[|©€¢£¥§]+|[()[\]{}<>\\/|&*#]+)(?=\s|$)/gu, '')
     .replace(/\s+[^\p{L}\p{N}]+$/gu, '')
     .replace(/\s{2,}/g, ' ')
-    .trim();
+    .trim()
+  );
+}
+
+function correctOcrWords(text) {
+  return text.replace(/\p{L}+(?:['’\-]\p{L}+)*/gu, word => correctOcrWord(word));
+}
+
+function correctOcrWord(word) {
+  if (!word || word.length < 5) {
+    return word;
+  }
+
+  const normalized = normalizeLexiconWord(word);
+  if (!normalized || LEXICON_BY_NORMALIZED.has(normalized)) {
+    return word;
+  }
+
+  let bestWord = '';
+  let bestDistance = Infinity;
+  let ambiguous = false;
+
+  for (const [candidateNormalized, candidate] of LEXICON_BY_NORMALIZED.entries()) {
+    if (candidateNormalized[0] !== normalized[0]) {
+      continue;
+    }
+
+    if (Math.abs(candidateNormalized.length - normalized.length) > 2) {
+      continue;
+    }
+
+    const distance = levenshteinWithin(normalized, candidateNormalized, 2);
+    if (distance === null) {
+      continue;
+    }
+
+    if (distance < bestDistance) {
+      bestWord = candidate;
+      bestDistance = distance;
+      ambiguous = false;
+    } else if (distance === bestDistance && candidate !== bestWord) {
+      ambiguous = true;
+    }
+  }
+
+  if (ambiguous || bestDistance === Infinity) {
+    return word;
+  }
+
+  const maxDistance = normalized.length >= 8 ? 2 : 1;
+  if (bestDistance > maxDistance) {
+    return word;
+  }
+
+  if (bestDistance === 1 && isSimpleTerminalVariant(normalized, normalizeLexiconWord(bestWord))) {
+    return word;
+  }
+
+  return applyOriginalCasing(word, bestWord);
+}
+
+function isSimpleTerminalVariant(source, candidate) {
+  if (!source || !candidate || source === candidate) {
+    return false;
+  }
+
+  if (candidate.startsWith(source)) {
+    return /^[sex]$/.test(candidate.slice(source.length));
+  }
+
+  if (source.startsWith(candidate)) {
+    return /^[sex]$/.test(source.slice(candidate.length));
+  }
+
+  return false;
+}
+
+function normalizeLexiconWord(word) {
+  return String(word || '')
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/œ/g, 'oe')
+    .replace(/æ/g, 'ae')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z']/g, '');
+}
+
+function applyOriginalCasing(source, corrected) {
+  if (!source) {
+    return corrected;
+  }
+
+  if (source === source.toUpperCase()) {
+    return corrected.toUpperCase();
+  }
+
+  if (source[0] === source[0].toUpperCase()) {
+    return corrected[0].toUpperCase() + corrected.slice(1);
+  }
+
+  return corrected;
+}
+
+function levenshteinWithin(a, b, maxDistance) {
+  const aLength = a.length;
+  const bLength = b.length;
+
+  if (Math.abs(aLength - bLength) > maxDistance) {
+    return null;
+  }
+
+  let previous = Array.from({ length: bLength + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= aLength; i += 1) {
+    const current = [i];
+    let minInRow = current[0];
+
+    for (let j = 1; j <= bLength; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + cost
+      );
+      current.push(value);
+      if (value < minInRow) {
+        minInRow = value;
+      }
+    }
+
+    if (minInRow > maxDistance) {
+      return null;
+    }
+
+    previous = current;
+  }
+
+  return previous[bLength] <= maxDistance ? previous[bLength] : null;
 }
 
 async function buildFilteredTextFromTsv(tsv, imageBuffer) {
