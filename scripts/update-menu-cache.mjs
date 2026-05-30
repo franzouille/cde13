@@ -13,6 +13,7 @@ const SOURCE_PAGE_URL = 'https://caissedesecolesparis13.fr/menus-cde13/';
 const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=menus-cde13';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const FORCE_REGEN_WEEK = process.env.FORCE_REGEN_WEEK || '';
+const FORCE_REGEN_ALL = process.env.FORCE_REGEN_ALL === '1';
 const FETCH_HEADERS = {
   'user-agent': 'Mozilla/5.0 (compatible; cde13-cache/1.0)',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
@@ -209,6 +210,10 @@ async function buildCachedMenu(menu, previousMenu, worker) {
 }
 
 function canReuseMenu(previousMenu, menu) {
+  if (FORCE_REGEN_ALL) {
+    return false;
+  }
+
   if (FORCE_REGEN_WEEK && menu.mondayDate === FORCE_REGEN_WEEK) {
     return false;
   }
@@ -408,6 +413,10 @@ function cleanupOcrLine(line) {
     .replace(/^[`'‘’"“”]+(?=\p{L})/gu, '')
     .replace(/\b[bBdD][iIl1][oO0]\b/g, 'bio')
     .replace(/([\p{L}])bio\b/gu, '$1 bio')
+    .replace(/\bpaySanne\b/gu, 'paysanne')
+    .replace(/\boriandre\b/gu, 'coriandre')
+    .replace(/\bolgnons\b/gu, 'oignons')
+    .replace(/\bbanc\b/gu, 'blanc')
     .replace(/\s+(?:[|©€¢£¥§]+|[()[\]{}<>\\/|&*#]+)(?=\s|$)/gu, '')
     .replace(/\s+[^\p{L}\p{N}]+$/gu, '')
     .replace(/\s{2,}/g, ' ')
@@ -425,8 +434,13 @@ function correctOcrWord(word) {
   }
 
   const normalized = normalizeLexiconWord(word);
-  if (!normalized || LEXICON_BY_NORMALIZED.has(normalized)) {
+  if (!normalized) {
     return word;
+  }
+
+  const exactCanonical = LEXICON_BY_NORMALIZED.get(normalized);
+  if (exactCanonical) {
+    return applyOriginalCasing(word, exactCanonical);
   }
 
   let bestWord = '';
@@ -434,10 +448,6 @@ function correctOcrWord(word) {
   let ambiguous = false;
 
   for (const [candidateNormalized, candidate] of LEXICON_BY_NORMALIZED.entries()) {
-    if (candidateNormalized[0] !== normalized[0]) {
-      continue;
-    }
-
     if (Math.abs(candidateNormalized.length - normalized.length) > 2) {
       continue;
     }
@@ -460,7 +470,7 @@ function correctOcrWord(word) {
     return word;
   }
 
-  const maxDistance = normalized.length >= 8 ? 2 : 1;
+  const maxDistance = normalized.length >= 7 ? 2 : 1;
   if (bestDistance > maxDistance) {
     return word;
   }

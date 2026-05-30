@@ -7,6 +7,10 @@ on:
         description: 'YYYY-MM-DD to force OCR regeneration'
         required: false
         type: string
+      force_regen_all:
+        description: 'Force OCR regeneration for the five published weeks'
+        required: false
+        type: boolean
   schedule:
     - cron: '15 18 * * 1-5'
 
@@ -63,6 +67,7 @@ jobs:
         env:
           PUBLIC_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           FORCE_REGEN_WEEK: ${{ inputs.force_regen_week }}
+          FORCE_REGEN_ALL: ${{ inputs.force_regen_all == true && '1' || '' }}
         run: npm run update-menu-cache
 
       - name: Upload Pages artifact
