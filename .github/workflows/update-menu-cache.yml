@@ -1,4 +1,4 @@
-name: Update menu cache
+name: Publish menu cache and site
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-menu-cache:
+  publish-menu:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
