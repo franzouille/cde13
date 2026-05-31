@@ -7,6 +7,9 @@ Ce repo porte l'automatisation de recuperation, crop, OCR et publication du cach
 Le workflow GitHub Actions recupere les menus publics CDE13, copie les images `menu-standard-du-*`, genere les crops par jour, OCRise ces crops, puis publie :
 
 ```text
+index.html
+styles.css
+app.js
 menus.json
 menus/YYYY-MM-DD.jpg
 menus/YYYY-MM-DD/lundi.jpg
@@ -19,6 +22,7 @@ menus/YYYY-MM-DD/vendredi.jpg
 URL cible :
 
 ```text
+https://franzouille.github.io/cde13/
 https://franzouille.github.io/cde13/menus.json
 ```
 
@@ -41,9 +45,23 @@ Generation locale du cache :
 PUBLIC_BASE_URL='https://franzouille.github.io/cde13/' npm run update-menu-cache
 ```
 
+Generation locale de la page statique, apres le cache :
+
+```sh
+npm run build-web
+```
+
+Generation complete de l'artifact GitHub Pages :
+
+```sh
+PUBLIC_BASE_URL='https://franzouille.github.io/cde13/' npm run build-pages
+```
+
 Resultat attendu :
 
+- generation de `dist/menu-cache/index.html`
 - generation de `dist/menu-cache/menus.json`
+- generation de `dist/menu-cache/styles.css` et `dist/menu-cache/app.js`
 - generation des images sources dans `dist/menu-cache/menus/`
 - generation des crops jour par jour dans `dist/menu-cache/menus/YYYY-MM-DD/`
 - presence de `dayTexts` OCRises dans `menus.json`
@@ -51,6 +69,8 @@ Resultat attendu :
 Notes :
 
 - `PUBLIC_BASE_URL` sert a fabriquer les URLs publiques dans `menus.json`.
+- `update-menu-cache` genere uniquement le cache JSON/images.
+- `build-web` copie seulement la page statique dans `dist/menu-cache`.
 - En local, le script essaie d'abord de reutiliser le `menus.json` public existant pour eviter de retraiter les menus inchanges.
 - Le dossier `dist/` est genere localement et ignore par Git.
 - Le dossier `.cache/tesseract/` contient le cache OCR local et est ignore par Git.

@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "update-menu-cache": "node scripts/update-menu-cache.mjs"
+    "update-menu-cache": "node scripts/update-menu-cache.mjs",
+    "build-web": "node scripts/build-web.mjs",
+    "build-pages": "npm run update-menu-cache && npm run build-web"
   },
   "devDependencies": {
     "playwright": "^1.52.0",

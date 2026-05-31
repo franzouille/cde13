@@ -42,6 +42,12 @@ const DAY_CROPS = [
   { day: 'Jeudi', slug: 'jeudi', left: 927 / 1653, top: 1012 / 2339, width: 596 / 1653, height: 571 / 2339 },
   { day: 'Vendredi', slug: 'vendredi', left: 123 / 1653, top: 1628 / 2339, width: 596 / 1653, height: 571 / 2339 }
 ];
+const CANONICAL_MENU_PHRASES = [
+  'BN casse-croûte',
+  'Fruit de saison',
+  'Petit Suisse',
+  'Saint Nectaire AOP'
+];
 
 let LEXICON_WORDS = [];
 let LEXICON_BY_NORMALIZED = new Map();
@@ -408,7 +414,7 @@ function cleanupOcrText(text) {
 }
 
 function cleanupOcrLine(line) {
-  return correctOcrWords(
+  const cleaned = correctOcrWords(
     normalizeOcrText(line)
     .replace(/^[`'‘’"“”]+(?=\p{L})/gu, '')
     .replace(/\b[bBdD][iIl1][oO0]\b/g, 'bio')
@@ -422,6 +428,60 @@ function cleanupOcrLine(line) {
     .replace(/\s{2,}/g, ' ')
     .trim()
   );
+
+  return stripTrailingOcrCode(correctCanonicalPhrases(cleaned));
+}
+
+function correctCanonicalPhrases(line) {
+  return CANONICAL_MENU_PHRASES.reduce((text, phrase) => correctCanonicalPhrase(text, phrase), line);
+}
+
+function correctCanonicalPhrase(line, phrase) {
+  const phraseTokens = tokenizePhraseWords(phrase);
+  const lineTokens = tokenizePhraseWords(line);
+  const phraseNorm = phraseTokens.map(token => token.normalized).join(' ');
+  const phraseLength = phraseTokens.length;
+
+  if (!phraseLength || lineTokens.length < phraseLength) {
+    return line;
+  }
+
+  for (let index = 0; index <= lineTokens.length - phraseLength; index += 1) {
+    const windowTokens = lineTokens.slice(index, index + phraseLength);
+    const windowNorm = windowTokens.map(token => token.normalized).join(' ');
+    const windowText = line.slice(windowTokens[0].start, windowTokens[windowTokens.length - 1].end);
+    const maxDistance = phraseNorm.length > 14 ? 2 : 1;
+    const distance = levenshteinWithin(windowNorm, phraseNorm, maxDistance);
+
+    if (distance !== null && (distance > 0 || windowText !== phrase)) {
+      return `${line.slice(0, windowTokens[0].start)}${phrase}${line.slice(windowTokens[windowTokens.length - 1].end)}`;
+    }
+  }
+
+  return line;
+}
+
+function tokenizePhraseWords(text) {
+  return [...String(text || '').matchAll(/[\p{L}\p{N}]+/gu)].map(match => ({
+    text: match[0],
+    normalized: normalizePhraseToken(match[0]),
+    start: match.index,
+    end: match.index + match[0].length
+  })).filter(token => token.normalized);
+}
+
+function normalizePhraseToken(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/œ/g, 'oe')
+    .replace(/æ/g, 'ae')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function stripTrailingOcrCode(line) {
+  return String(line || '').replace(/\s+\b(?!AB\b)[A-ZÀ-Ÿ]{1,2}\b$/u, '');
 }
 
 function correctOcrWords(text) {
@@ -650,7 +710,7 @@ function isAllowedShortWord(text) {
 function normalizeDayTexts(dayTexts) {
   const normalized = {};
   for (const crop of DAY_CROPS) {
-    normalized[crop.day] = ensureDayPrefix(normalizeOcrText(dayTexts?.[crop.day] || ''), crop.day);
+    normalized[crop.day] = ensureDayPrefix(cleanupOcrText(dayTexts?.[crop.day] || ''), crop.day);
   }
   return normalized;
 }
