@@ -1,4 +1,4 @@
-name: Publish menu cache and site
+name: Publish menu cache
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-menu:
+  publish-cache:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -70,7 +70,7 @@ jobs:
           FORCE_REGEN_ALL: ${{ inputs.force_regen_all == true && '1' || '' }}
         run: npm run update-menu-cache
 
-      - name: Generate site
+      - name: Add static viewer
         run: npm run build-web
 
       - name: Upload Pages artifact
