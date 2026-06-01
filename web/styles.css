@@ -241,7 +241,7 @@ h1 {
 
 .week-days {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -383,6 +383,12 @@ h1 {
   line-height: 1.42;
 }
 
+@media (min-width: 520px) {
+  .week-days {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (min-width: 760px) {
   .site-header,
   .page-shell {
@@ -404,6 +410,10 @@ h1 {
 
   .highlight-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .week-days {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .summary-card {
