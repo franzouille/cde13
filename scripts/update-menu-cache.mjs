@@ -14,6 +14,7 @@ const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=men
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const FORCE_REGEN_WEEK = process.env.FORCE_REGEN_WEEK || '';
 const FORCE_REGEN_ALL = process.env.FORCE_REGEN_ALL === '1';
+const OCR_ENGINE = 'tesseract-fra-v2';
 const FETCH_HEADERS = {
   'user-agent': 'Mozilla/5.0 (compatible; cde13-cache/1.0)',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
@@ -204,7 +205,7 @@ async function buildCachedMenu(menu, previousMenu, worker) {
         cachedImageUrl: buildPublicUrl(buildCachedImagePath(menu.mondayDate)),
         dayImageUrls: buildDayImageUrls(menu.mondayDate),
         dayTexts: normalizeDayTexts(previousMenu.dayTexts),
-        ocrEngine: previousMenu.ocrEngine || 'tesseract-fra',
+        ocrEngine: previousMenu.ocrEngine || OCR_ENGINE,
         ocrGeneratedAt: previousMenu.ocrGeneratedAt || new Date().toISOString()
       };
     } catch (error) {
@@ -227,6 +228,7 @@ function canReuseMenu(previousMenu, menu) {
   return Boolean(
     previousMenu &&
     previousMenu.originalImageUrl === menu.originalImageUrl &&
+    previousMenu.ocrEngine === OCR_ENGINE &&
     hasCompleteDayValues(previousMenu.dayTexts) &&
     hasCompleteDayValues(previousMenu.dayImageUrls) &&
     previousMenu.cachedImageUrl
@@ -315,7 +317,7 @@ async function generateMenuEntry(menu, worker) {
     cachedImageUrl: buildPublicUrl(cachedImagePath),
     dayImageUrls: dayArtifacts.dayImageUrls,
     dayTexts: dayArtifacts.dayTexts,
-    ocrEngine: 'tesseract-fra',
+    ocrEngine: OCR_ENGINE,
     ocrGeneratedAt: new Date().toISOString()
   };
 }
@@ -341,12 +343,12 @@ async function writeDayArtifacts(mondayDate, imageBytes, worker) {
       .extract(region)
       .jpeg({ quality: 92 })
       .toBuffer();
-    const ocrBuffer = await preprocessCropForOcr(cropBuffer);
+    const ocrBuffers = await preprocessCropForOcr(cropBuffer);
 
     await writeFile(join(OUT_DIR, filename), cropBuffer);
 
     dayImageUrls[crop.day] = buildPublicUrl(filename);
-    dayTexts[crop.day] = await recognizeDayText(worker, ocrBuffer, crop.day);
+    dayTexts[crop.day] = await recognizeDayText(worker, ocrBuffers, crop.day);
   }
 
   return { dayImageUrls, dayTexts };
@@ -374,27 +376,45 @@ async function preprocessCropForOcr(cropBuffer) {
     }])
     .toBuffer();
 
-  return sharp(masked)
-    .resize({
-      width: Math.round(width * 1.35),
-      withoutEnlargement: false
-    })
-    .grayscale()
-    .normalize()
-    .linear(1.2, -(255 * 0.1))
-    .sharpen()
-    .threshold(182)
-    .png()
-    .toBuffer();
+  const resizedWidth = Math.round(width * 1.35);
+  const base = sharp(masked).resize({
+    width: resizedWidth,
+    withoutEnlargement: false
+  });
+
+  return Promise.all([
+    base.clone()
+      .grayscale()
+      .normalize()
+      .linear(1.2, -(255 * 0.1))
+      .sharpen()
+      .threshold(182)
+      .png()
+      .toBuffer(),
+    base.clone()
+      .grayscale()
+      .normalize()
+      .sharpen()
+      .threshold(120)
+      .png()
+      .toBuffer()
+  ]);
 }
 
-async function recognizeDayText(worker, cropBuffer, day) {
-  const {
-    data: { text, tsv }
-  } = await worker.recognize(cropBuffer, {}, { tsv: true });
+async function recognizeDayText(worker, cropBuffers, day) {
+  const candidates = [];
 
-  const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
-  return ensureDayPrefix(cleanupOcrText(structuredText || text), day);
+  for (const cropBuffer of cropBuffers) {
+    const {
+      data: { text, tsv }
+    } = await worker.recognize(cropBuffer, {}, { tsv: true });
+
+    const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
+    const cleaned = ensureDayPrefix(cleanupOcrText(structuredText || text), day);
+    candidates.push({ text: cleaned, score: scoreOcrText(cleaned, day) });
+  }
+
+  return candidates.sort((a, b) => b.score - a.score)[0]?.text || ensureDayPrefix('', day);
 }
 
 function normalizeOcrText(text) {
@@ -411,6 +431,28 @@ function cleanupOcrText(text) {
     .map(cleanupOcrLine)
     .filter(Boolean)
     .join('\n');
+}
+
+function scoreOcrText(text, day) {
+  const lines = normalizeOcrText(text)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => normalizeText(line) !== normalizeText(day));
+
+  return lines.reduce((score, line) => {
+    const normalized = normalizeText(line);
+    const letters = [...line.matchAll(/\p{L}/gu)].length;
+    const words = normalized ? normalized.split(' ').filter(Boolean).length : 0;
+    const tinyNoise = letters <= 2 && words <= 1;
+    const usefulLine = letters >= 4 && words >= 2;
+
+    if (tinyNoise) {
+      return score - 3;
+    }
+
+    return score + (usefulLine ? 6 : 1) + Math.min(words, 8);
+  }, 0);
 }
 
 function cleanupOcrLine(line) {
@@ -716,16 +758,36 @@ function normalizeDayTexts(dayTexts) {
 }
 
 function ensureDayPrefix(text, day) {
-  const cleaned = normalizeOcrText(text);
-  if (!cleaned) {
+  const lines = normalizeOcrText(text)
+    .split('\n')
+    .map(line => stripLeadingDayName(line, day))
+    .filter(line => line && normalizeText(line) !== normalizeText(day));
+
+  if (!lines.length) {
     return day;
   }
 
-  if (normalizeText(cleaned).startsWith(normalizeText(day))) {
-    return cleaned;
+  return `${day}\n${lines.join('\n')}`;
+}
+
+function stripLeadingDayName(line, day) {
+  const trimmed = String(line || '').trim();
+  const normalizedDay = normalizeText(day);
+  const normalizedLine = normalizeText(trimmed);
+
+  if (normalizedLine === normalizedDay) {
+    return day;
   }
 
-  return `${day}\n${cleaned}`;
+  if (!normalizedLine.startsWith(`${normalizedDay} `)) {
+    return trimmed;
+  }
+
+  return trimmed.replace(new RegExp(`^${escapeRegExp(day)}\\b\\s*`, 'i'), '').trim();
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function buildCachedImagePath(mondayDate) {
