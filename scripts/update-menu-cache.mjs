@@ -52,6 +52,7 @@ const CANONICAL_MENU_PHRASES = [
 
 let LEXICON_WORDS = [];
 let LEXICON_BY_NORMALIZED = new Map();
+let IGNORED_LOGO_FRAGMENTS = new Set();
 
 async function main() {
   await loadLexicon();
@@ -95,6 +96,11 @@ async function main() {
 async function loadLexicon() {
   const payload = JSON.parse(await readFile(LEXICON_PATH, 'utf8'));
   LEXICON_WORDS = Array.isArray(payload?.words) ? payload.words : [];
+  IGNORED_LOGO_FRAGMENTS = new Set(
+    (Array.isArray(payload?.ignored_logo_fragments) ? payload.ignored_logo_fragments : [])
+      .map(normalizeLexiconWord)
+      .filter(Boolean)
+  );
   LEXICON_BY_NORMALIZED = new Map();
 
   for (const word of LEXICON_WORDS) {
@@ -724,24 +730,47 @@ function parseTsvRows(tsv) {
 
 function filterLineWords(words, imageWidth) {
   const lineHeight = Math.max(...words.map(word => word.height || 0), 0);
+  const cleanedWords = words.filter(word => !isVisualDust(word));
 
-  return words.filter(word => !isLikelyRightMarginNoise(word, imageWidth, lineHeight));
+  return cleanedWords.filter((word, index) => !isLikelyOcrNoise(word, cleanedWords[index - 1], imageWidth, lineHeight));
 }
 
-function isLikelyRightMarginNoise(word, imageWidth, lineHeight) {
+function isVisualDust(word) {
   const text = String(word.text || '').trim();
   if (!text) {
     return true;
   }
 
+  return word.width <= 4 || word.height <= 4;
+}
+
+function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
+  const text = String(word.text || '').trim();
+
   const rightSide = imageWidth > 0 && word.left >= imageWidth * 0.84;
+  const rightArea = imageWidth > 0 && word.left >= imageWidth * 0.70;
   const tinyToken = /^[A-Za-zÀ-ÿ0-9|&€#]{1,3}$/.test(text);
-  const lowConfidence = word.conf >= 0 && word.conf < 75;
   const shortHeight = lineHeight > 0 && word.height < lineHeight * 0.75;
   const narrowWord = imageWidth > 0 && word.width < imageWidth * 0.12;
   const suspiciousTinyToken = tinyToken && !isAllowedShortWord(text) && /[A-Z0-9|&€#]/.test(text);
+  const isolatedFromText = previousWord && imageWidth > 0 && (word.left - (previousWord.left + previousWord.width)) >= imageWidth * 0.07;
+  const isolatedRightToken = rightArea && isolatedFromText && (isNonLexicalShortToken(text) || isIgnoredLogoFragment(text));
 
-  return rightSide && narrowWord && (suspiciousTinyToken || lowConfidence || shortHeight);
+  return isolatedRightToken || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
+}
+
+function isIgnoredLogoFragment(text) {
+  const normalized = normalizeLexiconWord(text);
+  return Boolean(normalized && IGNORED_LOGO_FRAGMENTS.has(normalized));
+}
+
+function isNonLexicalShortToken(text) {
+  const normalized = normalizeLexiconWord(text);
+  if (!normalized || isAllowedShortWord(normalized)) {
+    return false;
+  }
+
+  return normalized.length <= 3 || /[0-9|&€#]/.test(text);
 }
 
 function isAllowedShortWord(text) {
@@ -761,7 +790,7 @@ function ensureDayPrefix(text, day) {
   const lines = normalizeOcrText(text)
     .split('\n')
     .map(line => stripLeadingDayName(line, day))
-    .filter(line => line && normalizeText(line) !== normalizeText(day));
+    .filter(line => line && !isDayHeaderLine(line, day));
 
   if (!lines.length) {
     return day;
@@ -784,6 +813,18 @@ function stripLeadingDayName(line, day) {
   }
 
   return trimmed.replace(new RegExp(`^${escapeRegExp(day)}\\b\\s*`, 'i'), '').trim();
+}
+
+function isDayHeaderLine(line, day) {
+  const normalizedLine = normalizeText(line);
+  const normalizedDay = normalizeText(day);
+
+  if (normalizedLine === normalizedDay) {
+    return true;
+  }
+
+  return normalizedLine.split(' ').length <= 2 &&
+    levenshteinWithin(normalizedLine.replace(/\s+/g, ''), normalizedDay, 1) !== null;
 }
 
 function escapeRegExp(text) {

@@ -1,6 +1,13 @@
 {
   "source": "keskonmange outputs canteen menus",
   "word_count": 548,
+  "ignored_logo_fragments": [
+    "AA",
+    "nee",
+    "ue",
+    "é",
+    "è"
+  ],
   "words": [
     "abricots",
     "accompagnement",
