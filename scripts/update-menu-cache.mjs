@@ -47,7 +47,8 @@ const CANONICAL_MENU_PHRASES = [
   'BN casse-croûte',
   'Fruit de saison',
   'Petit Suisse',
-  'Saint Nectaire AOP'
+  'Saint Nectaire AOP',
+  'Veracruz'
 ];
 
 let LEXICON_WORDS = [];
@@ -477,7 +478,7 @@ function cleanupOcrLine(line) {
     .trim()
   );
 
-  return stripTrailingOcrCode(correctCanonicalPhrases(cleaned));
+  return stripTrailingLogoFragment(stripTrailingOcrCode(correctCanonicalPhrases(cleaned)));
 }
 
 function correctCanonicalPhrases(line) {
@@ -532,12 +533,24 @@ function stripTrailingOcrCode(line) {
   return String(line || '').replace(/\s+\b(?!AB\b)[A-ZÀ-Ÿ]{1,2}\b$/u, '');
 }
 
+function stripTrailingLogoFragment(line) {
+  const text = String(line || '').trim();
+  const tokens = [...text.matchAll(/[^\s]+/g)];
+  const lastToken = tokens[tokens.length - 1];
+
+  if (!lastToken || !isIgnoredLogoFragment(lastToken[0])) {
+    return text;
+  }
+
+  return text.slice(0, lastToken.index).trim();
+}
+
 function correctOcrWords(text) {
   return text.replace(/\p{L}+(?:['’\-]\p{L}+)*/gu, word => correctOcrWord(word));
 }
 
 function correctOcrWord(word) {
-  if (!word || word.length < 5) {
+  if (!word || word.length < 2) {
     return word;
   }
 
@@ -549,6 +562,15 @@ function correctOcrWord(word) {
   const exactCanonical = LEXICON_BY_NORMALIZED.get(normalized);
   if (exactCanonical) {
     return applyOriginalCasing(word, exactCanonical);
+  }
+
+  const shortCanonical = correctShortOcrWord(word, normalized);
+  if (shortCanonical) {
+    return applyOriginalCasing(word, shortCanonical);
+  }
+
+  if (word.length < 5) {
+    return word;
   }
 
   let bestWord = '';
@@ -615,6 +637,20 @@ function normalizeLexiconWord(word) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z']/g, '');
+}
+
+function correctShortOcrWord(word, normalized) {
+  if (word.length > 3) {
+    return '';
+  }
+
+  for (const candidate of ['ail']) {
+    if (levenshteinWithin(normalized, normalizeLexiconWord(candidate), 1) !== null) {
+      return candidate;
+    }
+  }
+
+  return '';
 }
 
 function applyOriginalCasing(source, corrected) {
