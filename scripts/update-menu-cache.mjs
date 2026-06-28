@@ -484,21 +484,20 @@ function cleanupOcrLine(line) {
 function normalizeMenuOcrLine(line) {
   const text = String(line || '').trim();
   const normalized = normalizeText(text);
-  const compact = normalized.replace(/['\s]+/g, '');
 
   if (!normalized) {
     return '';
   }
 
-  if (normalized === 'vegetarien' || normalized === 'menu vegetarien') {
+  if (normalized === 'vegetarien' || normalized === 'menu-vegetarien') {
     return 'Menu végétarien';
   }
 
-  if ((normalized.includes('dernier jour') && normalized.includes('ecole')) || compact === 'dernierjourdecole') {
+  if (normalized === 'dernier-jour-d-ecole' || (normalized.includes('dernier-jour') && normalized.includes('ecole'))) {
     return '';
   }
 
-  if (/^vendredi\s+\d{1,2}$/.test(normalized)) {
+  if (/^vendredi-\d{1,2}$/.test(normalized)) {
     return '';
   }
 
