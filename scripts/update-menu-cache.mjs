@@ -494,7 +494,7 @@ function normalizeMenuOcrLine(line) {
     return 'Menu végétarien';
   }
 
-  if (compact === 'dernierjourdecole') {
+  if ((normalized.includes('dernier jour') && normalized.includes('ecole')) || compact === 'dernierjourdecole') {
     return '';
   }
 

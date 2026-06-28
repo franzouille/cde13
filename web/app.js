@@ -157,7 +157,7 @@ function cleanDayText(text, day) {
 function isBannerNoiseLine(line) {
   const normalized = normalizeText(line);
   const compact = normalized.replace(/['\s]+/g, '');
-  return compact === 'dernierjourdecole' ||
+  return ((normalized.includes('dernier jour') && normalized.includes('ecole')) || compact === 'dernierjourdecole') ||
     /^vendredi\s+\d{1,2}$/.test(normalized);
 }
 
