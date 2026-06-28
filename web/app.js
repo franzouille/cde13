@@ -128,9 +128,18 @@ function cleanDayText(text, day) {
       continue;
     }
 
+    if (isBannerNoiseLine(line)) {
+      continue;
+    }
+
     if (normalized === 'menu' && next === `${normalizeText(day)} vegetarien`) {
       cleaned.push('Menu végétarien');
       index += 1;
+      continue;
+    }
+
+    if (normalized === 'vegetarien' || normalized === 'menu vegetarien') {
+      cleaned.push('Menu végétarien');
       continue;
     }
 
@@ -143,6 +152,13 @@ function cleanDayText(text, day) {
   }
 
   return joinContinuationLines(dedupeAdjacent(cleaned));
+}
+
+function isBannerNoiseLine(line) {
+  const normalized = normalizeText(line);
+  const compact = normalized.replace(/['\s]+/g, '');
+  return compact === 'dernierjourdecole' ||
+    /^vendredi\s+\d{1,2}$/.test(normalized);
 }
 
 function renderApp() {

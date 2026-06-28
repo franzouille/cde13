@@ -478,7 +478,31 @@ function cleanupOcrLine(line) {
     .trim()
   );
 
-  return stripTrailingLogoFragment(stripTrailingOcrCode(correctCanonicalPhrases(cleaned)));
+  return normalizeMenuOcrLine(stripTrailingLogoFragment(stripTrailingOcrCode(correctCanonicalPhrases(cleaned))));
+}
+
+function normalizeMenuOcrLine(line) {
+  const text = String(line || '').trim();
+  const normalized = normalizeText(text);
+  const compact = normalized.replace(/['\s]+/g, '');
+
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized === 'vegetarien' || normalized === 'menu vegetarien') {
+    return 'Menu végétarien';
+  }
+
+  if (compact === 'dernierjourdecole') {
+    return '';
+  }
+
+  if (/^vendredi\s+\d{1,2}$/.test(normalized)) {
+    return '';
+  }
+
+  return text;
 }
 
 function correctCanonicalPhrases(line) {
