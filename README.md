@@ -74,6 +74,7 @@ Notes :
 - En local, le script essaie d'abord de reutiliser le `menus.json` public existant pour eviter de retraiter les menus inchanges.
 - Le dossier `dist/` est genere localement et ignore par Git.
 - Le dossier `.cache/tesseract/` contient le cache OCR local et est ignore par Git.
+- Point de vigilance debug : la page CDE13 peut changer le format des slugs d'images sans changer l'interface visible. Si des semaines manquent, inspecter le DOM rendu et les prefixes `menu-standard-du-*`, `menu-de-la-semaine-du-*` et `menus-*` avant de conclure que le site n'a rien de nouveau.
 
 ## GitHub Actions
 
