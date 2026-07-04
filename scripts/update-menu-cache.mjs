@@ -24,6 +24,7 @@ const FETCH_HEADERS = {
 const MONTHS = {
   janvier: 0,
   fevrier: 1,
+  fvrier: 1,
   mars: 2,
   avril: 3,
   mai: 4,
@@ -985,11 +986,11 @@ async function fetchBytes(url) {
 function extractMenus(html) {
   const imageUrls = uniqueMatches(
     html,
-    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/pdf2img\/(?:menu-standard-du|menu-de-la-semaine-du)-[^"' <]+\/page-001\.jpg/g
+    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/pdf2img\/(?:menu-standard-du|menu-de-la-semaine-du|menus-)[^"' <]+\/page-001\.jpg/g
   );
   const pdfUrls = uniqueMatches(
     html,
-    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/\d{4}\/\d{2}\/(?:menu-standard-du|menu-de-la-semaine-du)-[^"' <]+\.pdf/g
+    /https:\/\/caissedesecolesparis13\.fr\/wp-content\/uploads\/\d{4}\/\d{2}\/(?:menu-standard-du|menu-de-la-semaine-du|menus-)[^"' <]+\.pdf/g
   );
 
   return imageUrls
@@ -1023,7 +1024,18 @@ function buildMenuInfo(originalImageUrl, pdfUrls) {
 
 function parseMenuSlug(slug) {
   const normalized = normalizeText(slug);
-  let match = normalized.match(/^menu(?:-standard|-de-la-semaine)-du-(\d{1,2})-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
+  let match = normalized.match(/^menus-(\d{1,2})-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
+  if (match) {
+    return buildParsedMenuSlug({
+      startDay: Number(match[1]),
+      startMonthName: null,
+      endDay: Number(match[2]),
+      endMonthName: match[3],
+      year: Number(match[4])
+    });
+  }
+
+  match = normalized.match(/^menu(?:-standard|-de-la-semaine)-du-(\d{1,2})-au-(\d{1,2})-([a-z]+)-(\d{4})(?:-\d+)?$/);
   if (match) {
     return buildParsedMenuSlug({
       startDay: Number(match[1]),
