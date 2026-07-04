@@ -453,6 +453,7 @@ function scoreOcrText(text, day) {
     const letters = [...line.matchAll(/\p{L}/gu)].length;
     const words = normalized ? normalized.split(' ').filter(Boolean).length : 0;
     const symbolNoise = (line.match(/[:;@%|©€¢£¥§]/gu) || []).length;
+    const boundaryNoise = /^[^\\p{L}\\p{N}]/u.test(line) || /[^\\p{L}\\p{N}]$/u.test(line);
     const tinyNoise = letters <= 2 && words <= 1;
     const usefulLine = letters >= 4 && words >= 2;
 
@@ -460,7 +461,7 @@ function scoreOcrText(text, day) {
       return score - 3;
     }
 
-    return score + (usefulLine ? 6 : 1) + Math.min(words, 8) - (symbolNoise * 3);
+    return score + (usefulLine ? 6 : 1) + Math.min(words, 8) - (symbolNoise * 3) - (boundaryNoise ? 4 : 0);
   }, 0);
 }
 
