@@ -491,6 +491,10 @@ function normalizeMenuOcrLine(line) {
     return '';
   }
 
+  if (normalized === 'premier-jour-de' || normalized.includes('centres-de-loisirs')) {
+    return '';
+  }
+
   if (normalized === 'vegetarien' || normalized === 'menu-vegetarien') {
     return 'Menu végétarien';
   }

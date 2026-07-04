@@ -158,6 +158,8 @@ function isBannerNoiseLine(line) {
   const normalized = normalizeText(line);
   const compact = normalized.replace(/['\s]+/g, '');
   return ((normalized.includes('dernier jour') && normalized.includes('ecole')) || compact === 'dernierjourdecole') ||
+    normalized === 'premier jour de' ||
+    normalized.includes('centres de loisirs') ||
     /^vendredi\s+\d{1,2}$/.test(normalized);
 }
 
