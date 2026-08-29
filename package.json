@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test",
     "update-menu-cache": "node scripts/update-menu-cache.mjs",
     "build-web": "node scripts/build-web.mjs",
     "build-pages": "npm run update-menu-cache && npm run build-web"
