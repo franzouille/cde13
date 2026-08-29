@@ -2,21 +2,30 @@ const DATA_URL = new URL('menus.json', window.location.href).href;
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 const DAY_INDEX = Object.fromEntries(DAYS.map((day, index) => [day, index]));
 const CLOSED_RE = /\b(ferme|fermé|fermeture|férié|ferie)\b/i;
+const MENU_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const state = {
   payload: null,
   menus: [],
   highlights: [],
   lightbox: null,
-  restoreFocusId: null
+  restoreFocusId: null,
+  lastRefreshAt: 0
 };
 
 const app = document.querySelector('#app');
 const headerSubtitle = document.querySelector('#header-subtitle');
 
-document.addEventListener('DOMContentLoaded', init);
+window.addEventListener('pageshow', init);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - state.lastRefreshAt >= MENU_REFRESH_INTERVAL_MS) {
+    init();
+  }
+});
 
 async function init() {
+  state.lastRefreshAt = Date.now();
+
   try {
     const payload = await fetchMenus();
     state.payload = payload;
@@ -35,7 +44,9 @@ async function init() {
 }
 
 async function fetchMenus() {
-  const response = await fetch(DATA_URL, { cache: 'no-store' });
+  const freshDataUrl = new URL(DATA_URL);
+  freshDataUrl.searchParams.set('_', Date.now().toString());
+  const response = await fetch(freshDataUrl, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`menus.json a répondu HTTP ${response.status}`);
   }
