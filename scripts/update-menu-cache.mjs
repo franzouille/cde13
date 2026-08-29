@@ -1,5 +1,5 @@
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
@@ -807,7 +807,7 @@ function isVisualDust(word) {
     return true;
   }
 
-  return word.width <= 4 || word.height <= 4;
+  return word.width <= 6 || word.height <= 8;
 }
 
 function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
@@ -815,14 +815,22 @@ function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
 
   const rightSide = imageWidth > 0 && word.left >= imageWidth * 0.84;
   const rightArea = imageWidth > 0 && word.left >= imageWidth * 0.70;
+  const peripheralArea = imageWidth > 0 && word.left >= imageWidth * 0.65;
+  const outerContentArea = imageWidth > 0 && word.left >= imageWidth * 0.60;
   const tinyToken = /^[A-Za-zÀ-ÿ0-9|&€#]{1,3}$/.test(text);
   const shortHeight = lineHeight > 0 && word.height < lineHeight * 0.75;
   const narrowWord = imageWidth > 0 && word.width < imageWidth * 0.12;
+  const compactWord = imageWidth > 0 && word.width < imageWidth * 0.18;
+  const lowConfidence = Number.isFinite(word.conf) && word.conf < 50;
+  const veryLowConfidence = Number.isFinite(word.conf) && word.conf <= 10;
+  const boundaryPunctuation = /^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/u.test(text);
   const suspiciousTinyToken = tinyToken && !isAllowedShortWord(text) && /[A-Z0-9|&€#]/.test(text);
   const isolatedFromText = previousWord && imageWidth > 0 && (word.left - (previousWord.left + previousWord.width)) >= imageWidth * 0.07;
   const isolatedRightToken = rightArea && isolatedFromText && (isNonLexicalShortToken(text) || isIgnoredLogoFragment(text));
+  const isolatedPeripheralLowConfidence = peripheralArea && compactWord && lowConfidence && (!previousWord || isolatedFromText);
+  const peripheralBoundaryNoise = outerContentArea && compactWord && veryLowConfidence && boundaryPunctuation;
 
-  return isolatedRightToken || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
+  return isolatedRightToken || isolatedPeripheralLowConfidence || peripheralBoundaryNoise || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
 }
 
 function isIgnoredLogoFragment(text) {
@@ -1129,7 +1137,11 @@ function pad2(value) {
   return String(value).padStart(2, '0');
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
+
+export { filterLineWords };
