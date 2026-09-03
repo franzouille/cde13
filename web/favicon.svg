@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Menus CDE Paris 13</title>
+  <rect x="9" y="9" width="48" height="48" rx="8" fill="#11110f"/>
+  <rect x="5" y="5" width="48" height="48" rx="8" fill="#b8ea73" stroke="#11110f" stroke-width="3"/>
+  <text x="29" y="41" fill="#11110f" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="32" font-weight="900" letter-spacing="-2" text-anchor="middle">13</text>
+</svg>

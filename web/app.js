@@ -237,8 +237,10 @@ function renderHighlightCards() {
   }
 
   return `
-    <section class="highlight-grid" aria-label="Menus à venir">
-      ${state.highlights.map((highlight, index) => renderHighlightCard(highlight, index)).join('')}
+    <section class="highlight-section" aria-label="Menus du jour et à venir">
+      <div class="highlight-grid">
+        ${state.highlights.map((highlight, index) => renderHighlightCard(highlight, index)).join('')}
+      </div>
     </section>
   `;
 }
@@ -251,7 +253,7 @@ function renderHighlightCard(highlight, index) {
     .slice(0, 5);
 
   return `
-    <article class="summary-card" aria-labelledby="summary-title-${index}">
+    <article class="summary-card day-${escapeAttribute(normalizeText(highlight.day))}" aria-labelledby="summary-title-${index}">
       <div class="summary-head">
         <div>
           <p class="summary-label">${escapeHtml(highlight.label)}</p>
@@ -278,7 +280,10 @@ function renderDayMenu(menu, day) {
       <header class="menu-head">
         <div class="menu-head-row">
           <div>
-            <p class="muted">${escapeHtml(formatDayCardDate(date))}</p>
+            <h3 class="muted">
+              <span class="weekday">${escapeHtml(day)}</span>
+              <span class="day-date">${escapeHtml(formatDayCardDateShort(date))}</span>
+            </h3>
             <p class="day-status ${status ? '' : 'is-empty'}">${status ? escapeHtml(status) : '&nbsp;'}</p>
           </div>
           ${menu.dayImageUrls?.[day] ? `
@@ -437,6 +442,13 @@ function formatMenuTitle(day, date) {
 function formatDayCardDate(date) {
   return new Intl.DateTimeFormat('fr-FR', {
     weekday: 'long',
+    day: 'numeric',
+    month: 'long'
+  }).format(date);
+}
+
+function formatDayCardDateShort(date) {
+  return new Intl.DateTimeFormat('fr-FR', {
     day: 'numeric',
     month: 'long'
   }).format(date);
