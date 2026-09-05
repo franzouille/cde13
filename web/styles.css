@@ -51,8 +51,9 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid var(--acid);
+  outline: 3px solid var(--ink);
   outline-offset: 3px;
+  box-shadow: 0 0 0 6px var(--acid);
 }
 
 .skip-link {
@@ -205,7 +206,7 @@ h1 {
   --card-background: var(--blue);
   --card-text: #fff;
   --card-label: var(--acid);
-  --card-detail: rgba(255, 255, 255, 0.7);
+  --card-detail: #fff;
   --card-rule: rgba(255, 255, 255, 0.24);
   display: grid;
   align-content: start;
@@ -232,7 +233,7 @@ h1 {
   --card-background: var(--wednesday);
   --card-text: var(--ink);
   --card-label: var(--blue-dark);
-  --card-detail: rgba(17, 17, 15, 0.62);
+  --card-detail: rgba(17, 17, 15, 0.72);
   --card-rule: rgba(17, 17, 15, 0.2);
 }
 
@@ -242,6 +243,7 @@ h1 {
 
 .summary-card.day-vendredi {
   --card-background: var(--friday);
+  --card-label: #fff;
 }
 
 .summary-card:only-child {
@@ -371,10 +373,6 @@ h1 {
   transition: color 140ms ease;
 }
 
-.week-image-link:hover {
-  color: var(--blue);
-}
-
 .week-days {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -385,7 +383,7 @@ h1 {
 .menu-card {
   --day-background: var(--monday);
   --day-foreground: #fff;
-  --day-secondary: rgba(255, 255, 255, 0.72);
+  --day-secondary: #fff;
   overflow: hidden;
   border-width: 2px;
   border-radius: 6px;
@@ -404,7 +402,7 @@ h1 {
 .menu-card:nth-child(3) {
   --day-background: var(--wednesday);
   --day-foreground: var(--ink);
-  --day-secondary: rgba(17, 17, 15, 0.62);
+  --day-secondary: rgba(17, 17, 15, 0.72);
 }
 
 .menu-card:nth-child(4) {
@@ -462,12 +460,6 @@ h1 {
   font-size: 14px;
   line-height: 1;
   transition: background 140ms ease, transform 140ms ease;
-}
-
-.image-open-link:hover {
-  background: var(--ink);
-  color: #fff;
-  transform: translateY(-2px);
 }
 
 .menu-list li {
@@ -551,10 +543,6 @@ h1 {
   padding: 7px 9px;
 }
 
-.lightbox-close:hover {
-  background: var(--acid);
-}
-
 .lightbox img {
   display: block;
   width: 100%;
@@ -630,6 +618,27 @@ h1 {
 @media (min-width: 1080px) {
   .week-days {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .week-image-link:hover {
+    color: var(--blue);
+  }
+
+  .image-open-link:hover {
+    background: var(--ink);
+    color: #fff;
+  }
+
+  .lightbox-close:hover {
+    background: var(--acid);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .image-open-link:hover {
+    transform: translateY(-2px);
   }
 }
 
