@@ -3,6 +3,11 @@ const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 const DAY_INDEX = Object.fromEntries(DAYS.map((day, index) => [day, index]));
 const CLOSED_RE = /\b(ferme|fermé|fermeture|férié|ferie)\b/i;
 const MENU_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const EXTERNAL_ARROW_ICON = `
+  <svg class="external-arrow-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <path d="M4.5 11.5 11.5 4.5M6 4.5h5.5V10" />
+  </svg>
+`;
 
 const state = {
   payload: null,
@@ -226,7 +231,7 @@ function renderWeekImageButton(menu) {
       aria-label="Afficher le menu complet de la semaine du ${escapeAttribute(weekRange)}"
     >
       <span>menu complet</span>
-      <span aria-hidden="true">↗</span>
+      ${EXTERNAL_ARROW_ICON}
     </button>
   `;
 }
@@ -295,7 +300,7 @@ function renderDayMenu(menu, day) {
               data-lightbox-alt="${escapeAttribute(`Image originale du menu du ${day}`)}"
               data-lightbox-title="${escapeAttribute(`${day} · ${formatDayCardDate(date)}`)}"
               aria-label="Afficher l’image du ${day}"
-            >↗</button>
+            >${EXTERNAL_ARROW_ICON}</button>
           ` : ''}
         </div>
       </header>
