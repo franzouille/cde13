@@ -1,6 +1,13 @@
 name: Publish menu cache
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - 'scripts/build-web.mjs'
+      - '.github/workflows/update-menu-cache.yml'
   workflow_dispatch:
     inputs:
       force_regen_week:
