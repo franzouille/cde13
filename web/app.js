@@ -1,6 +1,13 @@
+import {
+  addDays,
+  buildMenuSections,
+  getDayDate,
+  getMenuEntries,
+  parseIsoDate,
+  startOfDay
+} from './menu-ordering.js';
+
 const DATA_URL = new URL('menus.json', window.location.href).href;
-const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
-const DAY_INDEX = Object.fromEntries(DAYS.map((day, index) => [day, index]));
 const CLOSED_RE = /\b(ferme|fermé|fermeture|férié|ferie)\b/i;
 const MENU_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const EXTERNAL_ARROW_ICON = `
@@ -13,6 +20,7 @@ const state = {
   payload: null,
   menus: [],
   highlights: [],
+  menuSections: null,
   lightbox: null,
   restoreFocusId: null,
   lastRefreshAt: 0
@@ -41,7 +49,9 @@ async function init() {
       return;
     }
 
-    state.highlights = getHighlightedDays(state.menus, new Date());
+    const today = new Date();
+    state.highlights = getHighlightedDays(state.menus, today);
+    state.menuSections = buildMenuSections(state.menus, state.highlights, today);
     renderApp();
   } catch (error) {
     renderError(error);
@@ -61,7 +71,7 @@ async function fetchMenus() {
 function normalizeMenus(menus) {
   return (Array.isArray(menus) ? menus : [])
     .filter(menu => menu?.mondayDate)
-    .sort((a, b) => b.mondayDate.localeCompare(a.mondayDate))
+    .sort((a, b) => a.mondayDate.localeCompare(b.mondayDate))
     .map(menu => ({
       ...menu,
       monday: parseIsoDate(menu.mondayDate),
@@ -73,30 +83,13 @@ function getHighlightedDays(menus, today = new Date()) {
   const todayStart = startOfDay(today);
   const entries = getMenuEntries(menus);
   const future = entries
-    .filter(entry => entry.date >= todayStart && hasUsableMenu(entry.menu, entry.day))
+    .filter(entry => entry.date >= todayStart)
     .slice(0, 2);
 
-  if (future.length) {
-    return future.map(entry => ({
-      ...entry,
-      label: formatHighlightLabel(entry.date, todayStart)
-    }));
-  }
-
-  return entries
-    .filter(entry => hasUsableMenu(entry.menu, entry.day))
-    .slice(-2)
-    .map(entry => ({ ...entry, label: 'Dernier menu disponible' }));
-}
-
-function getMenuEntries(menus) {
-  return menus
-    .flatMap(menu => DAYS.map(day => ({
-      menu,
-      day,
-      date: getDayDate(menu, day)
-    })))
-    .sort((a, b) => a.date - b.date);
+  return future.map(entry => ({
+    ...entry,
+    label: formatHighlightLabel(entry.date, todayStart)
+  }));
 }
 
 function formatHighlightLabel(date, today) {
@@ -197,24 +190,56 @@ function renderApp() {
 }
 
 function renderAllMenus() {
+  const { currentWeek, futureWeeks, archivedWeeks } = state.menuSections;
+
   return `
     <section class="all-weeks" aria-label="Tous les menus disponibles">
-      ${state.menus.map(menu => `
-        <section class="week-section">
-          <div class="week-head">
-            <h2 class="week-title">${escapeHtml(formatWeekRange(menu))}</h2>
-            ${renderWeekImageButton(menu)}
-          </div>
-          <div class="week-days">
-            ${DAYS.map(day => renderDayMenu(menu, day)).join('')}
-          </div>
-        </section>
-      `).join('')}
+      ${currentWeek ? renderWeekSection(currentWeek, { current: true, sectionId: 'current' }) : ''}
+      ${futureWeeks.map(week => renderWeekSection(week, { sectionId: `future-${week.menu.mondayDate}` })).join('')}
+      ${archivedWeeks.length ? renderArchiveSection(archivedWeeks) : ''}
     </section>
   `;
 }
 
-function renderWeekImageButton(menu) {
+function renderWeekSection(week, { archive = false, current = false, sectionId } = {}) {
+  const weekRange = formatWeekRange(week.menu);
+  const headingTag = archive ? 'h3' : 'h2';
+  const sectionClasses = [
+    'week-section',
+    current ? 'week-section--current' : '',
+    archive ? 'week-section--archive' : ''
+  ].filter(Boolean).join(' ');
+
+  return `
+    <section class="${sectionClasses}" ${current ? 'aria-label="Menus restants de la semaine"' : ''}>
+      <div class="week-head ${current ? 'week-head--current' : ''}">
+        ${current
+          ? `<h2 class="visually-hidden">Menus restants · ${escapeHtml(weekRange)}</h2>`
+          : `<${headingTag} class="week-title">${escapeHtml(weekRange)}</${headingTag}>`}
+        ${renderWeekImageButton(week.menu, `${sectionId}-week`)}
+      </div>
+      <div class="week-days week-days--count-${week.entries.length}">
+        ${week.entries.map(entry => renderDayMenu(entry.menu, entry.day, sectionId)).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderArchiveSection(archivedWeeks) {
+  return `
+    <section class="archive-section" aria-labelledby="archive-title">
+      <h2 class="archive-title" id="archive-title">Anciens menus</h2>
+      <div class="archive-weeks">
+        ${archivedWeeks.map(week => renderWeekSection(week, {
+          archive: true,
+          sectionId: `archive-${week.menu.mondayDate}`
+        })).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderWeekImageButton(menu, lightboxId) {
   if (!menu.cachedImageUrl) {
     return '';
   }
@@ -224,7 +249,7 @@ function renderWeekImageButton(menu) {
     <button
       class="week-image-link"
       type="button"
-      data-lightbox-id="${escapeAttribute(`${menu.mondayDate}-week`)}"
+      data-lightbox-id="${escapeAttribute(lightboxId)}"
       data-lightbox-url="${escapeAttribute(menu.cachedImageUrl)}"
       data-lightbox-alt="${escapeAttribute(`Image originale du menu de la semaine du ${weekRange}`)}"
       data-lightbox-title="${escapeAttribute(`Menu complet · ${weekRange}`)}"
@@ -238,7 +263,11 @@ function renderWeekImageButton(menu) {
 
 function renderHighlightCards() {
   if (!state.highlights.length) {
-    return '';
+    return `
+      <section class="highlight-section highlight-section--empty" aria-label="Menus à venir">
+        <p class="upcoming-empty">Aucun menu à venir disponible.</p>
+      </section>
+    `;
   }
 
   return `
@@ -252,10 +281,10 @@ function renderHighlightCards() {
 
 function renderHighlightCard(highlight, index) {
   const allLines = cleanDayText(highlight.menu.dayTexts?.[highlight.day], highlight.day);
-  const status = getDayStatus(allLines, isClosedDay(highlight.menu, highlight.day));
-  const lines = allLines
-    .filter(line => !isClosedLine(line) && !isMetaLine(line))
-    .slice(0, 5);
+  const closed = isClosedDay(highlight.menu, highlight.day);
+  const status = getDayStatus(allLines, closed);
+  const lines = closed ? [] : allLines
+    .filter(line => !isClosedLine(line) && !isMetaLine(line));
 
   return `
     <article class="summary-card day-${escapeAttribute(normalizeText(highlight.day))}" aria-labelledby="summary-title-${index}">
@@ -265,15 +294,18 @@ function renderHighlightCard(highlight, index) {
           <h2 id="summary-title-${index}">${escapeHtml(formatMenuTitle(highlight.day, highlight.date))}</h2>
           <p class="day-status ${status ? '' : 'is-empty'}">${status ? escapeHtml(status) : '&nbsp;'}</p>
         </div>
+        ${renderDayImageButton(highlight.menu, highlight.day, highlight.date, `highlight-${highlight.menu.mondayDate}-${highlight.day}`)}
       </div>
-      <ul class="summary-list">
-        ${lines.length ? lines.map(line => `<li>${formatMenuLine(line)}</li>`).join('') : '<li>Menu non renseigné.</li>'}
-      </ul>
+      ${closed
+        ? ''
+        : `<ul class="summary-list">
+            ${lines.length ? lines.map(line => `<li>${formatMenuLine(line)}</li>`).join('') : '<li>Menu non renseigné.</li>'}
+          </ul>`}
     </article>
   `;
 }
 
-function renderDayMenu(menu, day) {
+function renderDayMenu(menu, day, sectionId) {
   const date = getDayDate(menu, day);
   const lines = cleanDayText(menu.dayTexts?.[day], day);
   const closed = isClosedDay(menu, day);
@@ -281,7 +313,7 @@ function renderDayMenu(menu, day) {
   const contentLines = closed ? [] : lines.filter(line => !isClosedLine(line) && !isMetaLine(line));
 
   return `
-    <article class="menu-card">
+    <article class="menu-card day-${escapeAttribute(normalizeText(day))}">
       <header class="menu-head">
         <div class="menu-head-row">
           <div>
@@ -291,17 +323,9 @@ function renderDayMenu(menu, day) {
             </h3>
             <p class="day-status ${status ? '' : 'is-empty'}">${status ? escapeHtml(status) : '&nbsp;'}</p>
           </div>
-          ${menu.dayImageUrls?.[day] ? `
-            <button
-              class="image-open-link"
-              type="button"
-              data-lightbox-id="${escapeAttribute(`${menu.mondayDate}-${day}`)}"
-              data-lightbox-url="${escapeAttribute(menu.dayImageUrls[day])}"
-              data-lightbox-alt="${escapeAttribute(`Image originale du menu du ${day}`)}"
-              data-lightbox-title="${escapeAttribute(`${day} · ${formatDayCardDate(date)}`)}"
-              aria-label="Afficher l’image du ${day}"
-            >${EXTERNAL_ARROW_ICON}</button>
-          ` : ''}
+          <div class="menu-head-actions">
+            ${renderDayImageButton(menu, day, date, `${sectionId}-${menu.mondayDate}-${day}`)}
+          </div>
         </div>
       </header>
 
@@ -309,6 +333,24 @@ function renderDayMenu(menu, day) {
         ? ''
         : renderMenuLines(contentLines)}
     </article>
+  `;
+}
+
+function renderDayImageButton(menu, day, date, lightboxId) {
+  if (!menu.dayImageUrls?.[day]) {
+    return '';
+  }
+
+  return `
+    <button
+      class="image-open-link"
+      type="button"
+      data-lightbox-id="${escapeAttribute(lightboxId)}"
+      data-lightbox-url="${escapeAttribute(menu.dayImageUrls[day])}"
+      data-lightbox-alt="${escapeAttribute(`Image originale du menu du ${day}`)}"
+      data-lightbox-title="${escapeAttribute(`${day} · ${formatDayCardDate(date)}`)}"
+      aria-label="Afficher l’image du ${day}"
+    >${EXTERNAL_ARROW_ICON}</button>
   `;
 }
 
@@ -414,10 +456,6 @@ function renderError(error) {
   `;
 }
 
-function hasUsableMenu(menu, day) {
-  return !isClosedDay(menu, day) && cleanDayText(menu.dayTexts?.[day], day).some(line => !isClosedLine(line) && !isMetaLine(line));
-}
-
 function isClosedDay(menu, day) {
   const lines = cleanDayText(menu.dayTexts?.[day], day);
   return lines.some(isClosedLine) && !lines.some(line => !isClosedLine(line) && !isMetaLine(line));
@@ -457,25 +495,6 @@ function formatDayCardDateShort(date) {
     day: 'numeric',
     month: 'long'
   }).format(date);
-}
-
-function getDayDate(menu, day) {
-  return addDays(menu.monday, DAY_INDEX[day] || 0);
-}
-
-function parseIsoDate(value) {
-  const [year, month, day] = String(value).split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function addDays(date, amount) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + amount);
-  return startOfDay(next);
 }
 
 function daysBetween(start, end) {
