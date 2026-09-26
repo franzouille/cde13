@@ -419,10 +419,14 @@ async function recognizeDayText(worker, cropBuffers, day) {
 
     const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
     const cleaned = ensureDayPrefix(cleanupOcrText(structuredText || text), day);
-    candidates.push({ text: cleaned, score: scoreOcrText(cleaned, day) });
+    candidates.push({
+      text: cleaned,
+      score: scoreOcrText(cleaned, day),
+      confidence: scoreOcrConfidence(tsv)
+    });
   }
 
-  return candidates.sort((a, b) => b.score - a.score)[0]?.text || ensureDayPrefix('', day);
+  return candidates.sort((a, b) => b.score - a.score || b.confidence - a.confidence)[0]?.text || ensureDayPrefix('', day);
 }
 
 function normalizeOcrText(text) {
@@ -463,6 +467,13 @@ function scoreOcrText(text, day) {
 
     return score + (usefulLine ? 6 : 1) + Math.min(words, 8) - (symbolNoise * 3) - (boundaryNoise ? 4 : 0);
   }, 0);
+}
+
+function scoreOcrConfidence(tsv) {
+  const words = parseTsvRows(tsv || '').filter(row => row.level === 5 && row.text && row.conf >= 0);
+  return words.length
+    ? words.reduce((total, word) => total + word.conf, 0) / words.length
+    : 0;
 }
 
 function cleanupOcrLine(line) {
@@ -824,13 +835,26 @@ function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
   const lowConfidence = Number.isFinite(word.conf) && word.conf < 50;
   const veryLowConfidence = Number.isFinite(word.conf) && word.conf <= 10;
   const boundaryPunctuation = /^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/u.test(text);
+  const decorativeMark = /^[_.…]+$/u.test(text);
+  const oversizedPeripheralUncertainWord = lowConfidence && imageWidth > 0 &&
+    word.left >= imageWidth * 0.20 &&
+    word.width >= imageWidth * 0.45 &&
+    word.left + word.width >= imageWidth * 0.82;
+  const uncertainWordOverLogoBand = lowConfidence && imageWidth > 0 &&
+    word.left >= imageWidth * 0.65 &&
+    word.left + word.width >= imageWidth * 0.85;
   const suspiciousTinyToken = tinyToken && !isAllowedShortWord(text) && /[A-Z0-9|&€#]/.test(text);
-  const isolatedFromText = previousWord && imageWidth > 0 && (word.left - (previousWord.left + previousWord.width)) >= imageWidth * 0.07;
-  const isolatedRightToken = rightArea && isolatedFromText && (isNonLexicalShortToken(text) || isIgnoredLogoFragment(text));
+  const previousIsDecorativeMark = previousWord && /^[_.…]+$/u.test(String(previousWord.text || '').trim());
+  const isolatedFromText = Boolean(previousWord) && imageWidth > 0 && (
+    previousIsDecorativeMark ||
+    (word.left - (previousWord.left + previousWord.width)) >= imageWidth * 0.07
+  );
+  const isolatedRightToken = rightArea && isolatedFromText && (isNonLexicalShortToken(text) || isIgnoredLogoFragment(text) || decorativeMark);
   const isolatedPeripheralLowConfidence = peripheralArea && compactWord && lowConfidence && (!previousWord || isolatedFromText);
+  const isolatedPeripheralBoundaryNoise = peripheralArea && lowConfidence && boundaryPunctuation && isolatedFromText;
   const peripheralBoundaryNoise = outerContentArea && compactWord && veryLowConfidence && boundaryPunctuation;
 
-  return isolatedRightToken || isolatedPeripheralLowConfidence || peripheralBoundaryNoise || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
+  return oversizedPeripheralUncertainWord || uncertainWordOverLogoBand || isolatedRightToken || isolatedPeripheralLowConfidence || isolatedPeripheralBoundaryNoise || peripheralBoundaryNoise || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
 }
 
 function isIgnoredLogoFragment(text) {
@@ -840,11 +864,15 @@ function isIgnoredLogoFragment(text) {
 
 function isNonLexicalShortToken(text) {
   const normalized = normalizeLexiconWord(text);
+  if (/[0-9|&€#]/.test(text)) {
+    return true;
+  }
+
   if (!normalized || isAllowedShortWord(normalized)) {
     return false;
   }
 
-  return normalized.length <= 3 || /[0-9|&€#]/.test(text);
+  return normalized.length <= 3;
 }
 
 function isAllowedShortWord(text) {

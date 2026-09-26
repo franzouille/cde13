@@ -66,6 +66,23 @@ test('very-low-confidence punctuation fragments touching menu text are removed i
   assert.equal(line, 'Fromage Saint Môret bio');
 });
 
+test('drops isolated decorative tokens at the edge of a text row', () => {
+  const gouda = filteredLine([
+    word('Fromage', 19, 120),
+    word('bio', 154, 52),
+    word('_', 609, 47, { conf: 83, height: 13 }),
+    word('4', 666, 70, { conf: 50, height: 90 })
+  ]);
+  const oversizedUncertainReading = filteredLine([
+    word('Texte', 19, 100),
+    word('bio', 130, 52),
+    word('merged-reading', 203, 531, { conf: 17 })
+  ]);
+
+  assert.equal(gouda, 'Fromage bio');
+  assert.equal(oversizedUncertainReading, 'Texte bio');
+});
+
 test('representative historical right-edge menu text remains unchanged', () => {
   const historicalLines = [
     [word('Tomate', 14, 105), word('bio', 132, 53), word("d'Île-de-France", 198, 212), word('Vinaigrette', 423, 170)],
