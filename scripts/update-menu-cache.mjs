@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -9,6 +9,7 @@ const OUT_DIR = join(REPO_ROOT, 'dist', 'menu-cache');
 const MENUS_DIR = join(OUT_DIR, 'menus');
 const OCR_CACHE_DIR = join(REPO_ROOT, '.cache', 'tesseract');
 const LEXICON_PATH = join(REPO_ROOT, 'data', 'canteen_lexicon.json');
+const MANUAL_MENUS_DIR = join(REPO_ROOT, 'data', 'manual-menus');
 const SOURCE_PAGE_URL = 'https://caissedesecolesparis13.fr/menus-cde13/';
 const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=menus-cde13';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
@@ -64,7 +65,8 @@ async function main() {
   await mkdir(MENUS_DIR, { recursive: true });
 
   const html = await loadMenuHtml();
-  const menus = extractMenus(html).slice(-5);
+  const manualMenus = await loadManualMenus();
+  const menus = mergeManualMenus(extractMenus(html), manualMenus).slice(-5);
 
   if (!menus.length) {
     throw new Error('No menu-standard image was found in the CDE13 page.');
@@ -201,6 +203,24 @@ async function readLocalDayAssets(dayImageUrls) {
 }
 
 async function buildCachedMenu(menu, previousMenu, worker) {
+  if (menu.manualImagePath) {
+    const cachedImagePath = buildCachedImagePath(menu.mondayDate);
+    await writeFile(join(OUT_DIR, cachedImagePath), await readFile(menu.manualImagePath));
+    const cachedImageUrl = buildPublicUrl(cachedImagePath);
+    return {
+      weekLabel: menu.weekLabel,
+      mondayDate: menu.mondayDate,
+      pdfUrl: menu.pdfUrl,
+      originalImageUrl: menu.originalImageUrl,
+      cachedImagePath,
+      cachedImageUrl,
+      dayImageUrls: Object.fromEntries(DAY_CROPS.map(({ day }) => [day, cachedImageUrl])),
+      dayTexts: menu.dayTexts,
+      ocrEngine: 'manual-transcription-v1',
+      ocrGeneratedAt: menu.transcribedAt
+    };
+  }
+
   if (canReuseMenu(previousMenu, menu)) {
     try {
       await restoreMenuAssets(previousMenu, menu.mondayDate);
@@ -1025,6 +1045,22 @@ async function fetchBytes(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function loadManualMenus() {
+  const files = await readdir(MANUAL_MENUS_DIR);
+  return Promise.all(files.filter(name => /^\d{4}-\d{2}-\d{2}\.json$/.test(name)).map(async name => {
+    const menu = JSON.parse(await readFile(join(MANUAL_MENUS_DIR, name), 'utf8'));
+    if (`${menu.mondayDate}.json` !== name || !hasCompleteDayValues(menu.dayTexts)) {
+      throw new Error(`Invalid manual menu: ${name}`);
+    }
+    return { ...menu, manualImagePath: join(MANUAL_MENUS_DIR, `${menu.mondayDate}.jpg`) };
+  }));
+}
+
+function mergeManualMenus(menus, manualMenus) {
+  return [...new Map([...menus, ...manualMenus].map(menu => [menu.mondayDate, menu])).values()]
+    .sort((a, b) => a.mondayDate.localeCompare(b.mondayDate));
+}
+
 function extractMenus(html) {
   const imageUrls = uniqueMatches(
     html,
@@ -1172,4 +1208,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   });
 }
 
-export { filterLineWords };
+export { filterLineWords, loadManualMenus, mergeManualMenus, buildCachedMenu };

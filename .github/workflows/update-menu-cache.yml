@@ -6,7 +6,8 @@ on:
       - main
     paths:
       - 'web/**'
-      - 'scripts/build-web.mjs'
+      - 'scripts/**'
+      - 'data/**'
       - '.github/workflows/update-menu-cache.yml'
   workflow_dispatch:
     inputs:
