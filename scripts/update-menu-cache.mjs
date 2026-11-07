@@ -15,7 +15,7 @@ const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=men
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const FORCE_REGEN_WEEK = process.env.FORCE_REGEN_WEEK || '';
 const FORCE_REGEN_ALL = process.env.FORCE_REGEN_ALL === '1';
-const OCR_ENGINE = 'tesseract-fra-v2';
+const OCR_ENGINE = 'tesseract-fra-v3';
 const FETCH_HEADERS = {
   'user-agent': 'Mozilla/5.0 (compatible; cde13-cache/1.0)',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
@@ -382,8 +382,50 @@ async function writeDayArtifacts(mondayDate, imageBytes, worker) {
   return { dayImageUrls, dayTexts };
 }
 
+// Remove thin coloured table rules before thresholding. Black type and coloured
+// food names remain intact; only long runs in narrow rows/edge columns qualify.
+async function removeMenuRules(buffer) {
+  const { data, info } = await sharp(buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const isColour = (x, y) => {
+    const i = (y * width + x) * channels;
+    const max = Math.max(data[i], data[i + 1], data[i + 2]);
+    const min = Math.min(data[i], data[i + 1], data[i + 2]);
+    return max - min > 55 && min < 180;
+  };
+  const header = Math.round(height * 0.19);
+  const columns = [];
+  for (let x = 0; x < width; x++) {
+    if (x > width * 0.03 && x < width * 0.97) continue;
+    let count = 0;
+    for (let y = header; y < height; y++) if (isColour(x, y)) count++;
+    if (count > (height - header) * 0.65) columns.push(x);
+  }
+  // Capture horizontal rules, including dotted rules, but never broad headers.
+  const rows = [];
+  for (let y = header; y < height; y++) {
+    let count = 0;
+    for (let x = 0; x < width; x++) if (isColour(x, y)) count++;
+    if (count > width * 0.35) rows.push(y);
+  }
+  const clear = (x, y) => {
+    if (!isColour(x, y)) return;
+    const i = (y * width + x) * channels;
+    data[i] = data[i + 1] = data[i + 2] = 255;
+  };
+  for (const x of columns) for (let y = header; y < height; y++) clear(x, y);
+  for (const y of rows) {
+    let first = y, last = y;
+    while (rows.includes(first - 1)) first--;
+    while (rows.includes(last + 1)) last++;
+    if (last - first + 1 > Math.max(3, Math.round(height * 0.007))) continue;
+    for (let x = 0; x < width; x++) clear(x, y);
+  }
+  return sharp(data, { raw: info }).png().toBuffer();
+}
+
 async function preprocessCropForOcr(cropBuffer) {
-  const image = sharp(cropBuffer);
+  const image = sharp(await removeMenuRules(cropBuffer));
   const metadata = await image.metadata();
   const width = metadata.width || 0;
   const height = metadata.height || 0;
@@ -1208,4 +1250,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   });
 }
 
-export { filterLineWords, loadManualMenus, mergeManualMenus, buildCachedMenu };
+export { removeMenuRules, filterLineWords, loadManualMenus, mergeManualMenus, buildCachedMenu };

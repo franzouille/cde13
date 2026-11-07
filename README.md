@@ -79,3 +79,15 @@ Notes :
 ## GitHub Actions
 
 Le workflow GitHub Actions fait la meme chose que le run local, puis publie `dist/menu-cache` sur GitHub Pages.
+
+## Prétraitement OCR
+
+Le moteur `tesseract-fra-v3` retire les traits colorés fins du tableau avant
+le seuillage : colonnes continues sur les bords, lignes horizontales fines
+(y compris pointillées). Les pixels sombres des lettres et les zones colorées
+épaisses sont préservés. Cela évite que le cadre fusionne avec les premières
+lettres. Aucun nom de plat ni aucune date n'est corrigé spécifiquement.
+Le changement de version invalide les anciens résultats OCR réutilisables.
+
+`npm test` vérifie notamment que ce nettoyage conserve les lettres sombres,
+les libellés colorés et les images neutres.
