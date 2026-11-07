@@ -91,3 +91,14 @@ Le changement de version invalide les anciens résultats OCR réutilisables.
 
 `npm test` vérifie notamment que ce nettoyage conserve les lettres sombres,
 les libellés colorés et les images neutres.
+
+Le moteur `tesseract-fra-v4` préserve aussi les lettres orange sous l’en-tête
+avant seuillage. Une ligne de confiance inférieure à 60 peut être remplacée
+par une lecture située à la même hauteur et plus fiable d’au moins 20 points
+sur l’autre variante. Les mots de liaison courts alignés avec le texte sont
+conservés près des logos. Aucun mot manquant n’est inventé à partir d’un menu.
+
+La lecture de base reste la référence. Les variantes pour texte orange ne
+peuvent ajouter ou remplacer que des lignes dont la position contient des
+pixels orange mesurés dans la zone de texte, avec une confiance d’au moins 80.
+Cela préserve les autres lignes du menu et du goûter.

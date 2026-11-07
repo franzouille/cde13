@@ -15,7 +15,7 @@ const REST_URL = 'https://caissedesecolesparis13.fr/wp-json/wp/v2/pages?slug=men
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const FORCE_REGEN_WEEK = process.env.FORCE_REGEN_WEEK || '';
 const FORCE_REGEN_ALL = process.env.FORCE_REGEN_ALL === '1';
-const OCR_ENGINE = 'tesseract-fra-v3';
+const OCR_ENGINE = 'tesseract-fra-v4';
 const FETCH_HEADERS = {
   'user-agent': 'Mozilla/5.0 (compatible; cde13-cache/1.0)',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
@@ -424,8 +424,21 @@ async function removeMenuRules(buffer) {
   return sharp(data, { raw: info }).png().toBuffer();
 }
 
-async function preprocessCropForOcr(cropBuffer) {
-  const image = sharp(await removeMenuRules(cropBuffer));
+// Use the darkest colour channel for warm coloured lettering, which ordinary
+// luminance thresholding otherwise turns white. Neutral black type is unchanged.
+async function preserveWarmText(buffer) {
+  const { data, info } = await sharp(buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < data.length; i += info.channels) {
+    const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+    if (Math.floor(i / info.channels / info.width) >= info.height * 0.22 &&
+        r - g > 35 && g - b > 20) data[i] = data[i + 1] = data[i + 2] = b;
+  }
+  return sharp(data, { raw: info }).png().toBuffer();
+}
+
+async function preprocessCropForOcr(cropBuffer, warm = false) {
+  const cleaned = await removeMenuRules(cropBuffer);
+  const image = sharp(warm ? await preserveWarmText(cleaned) : cleaned);
   const metadata = await image.metadata();
   const width = metadata.width || 0;
   const height = metadata.height || 0;
@@ -452,7 +465,7 @@ async function preprocessCropForOcr(cropBuffer) {
     withoutEnlargement: false
   });
 
-  return Promise.all([
+  const variants = await Promise.all([
     base.clone()
       .grayscale()
       .normalize()
@@ -469,26 +482,64 @@ async function preprocessCropForOcr(cropBuffer) {
       .png()
       .toBuffer()
   ]);
+  if (warm) return variants;
+  const { data, info } = await sharp(cleaned).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const warmRows = [];
+  // Locate coloured lettering in the content area, excluding the logo band.
+  for (let y = Math.ceil(info.height * 0.22); y < info.height; y++) {
+    let count = 0;
+    for (let x = 0; x < info.width * 0.65; x++) {
+      const i = (y * info.width + x) * info.channels;
+      if (data[i] - data[i + 1] > 35 && data[i + 1] - data[i + 2] > 20) count++;
+    }
+    if (count >= 5) warmRows.push(y * resizedWidth / width);
+  }
+  if (!warmRows.length) return variants;
+  return variants.concat((await preprocessCropForOcr(cropBuffer, true)).map(buffer => ({ buffer, warmRows })));
 }
 
 async function recognizeDayText(worker, cropBuffers, day) {
   const candidates = [];
 
-  for (const cropBuffer of cropBuffers) {
+  for (const input of cropBuffers) {
+    const cropBuffer = input.warmRows ? input.buffer : input;
     const {
       data: { text, tsv }
     } = await worker.recognize(cropBuffer, {}, { tsv: true });
 
-    const structuredText = await buildFilteredTextFromTsv(tsv, cropBuffer);
+    const lines = await buildFilteredTextFromTsv(tsv, cropBuffer, true);
+    const structuredText = lines.map(line => line.text).join('\n');
     const cleaned = ensureDayPrefix(cleanupOcrText(structuredText || text), day);
     candidates.push({
       text: cleaned,
+      lines,
+      warmRows: input.warmRows,
       score: scoreOcrText(cleaned, day),
       confidence: scoreOcrConfidence(tsv)
     });
   }
 
-  return candidates.sort((a, b) => b.score - a.score || b.confidence - a.confidence)[0]?.text || ensureDayPrefix('', day);
+  const best = candidates.filter(candidate => !candidate.warmRows).sort((a, b) => b.score - a.score || b.confidence - a.confidence)[0];
+  if (!best) return ensureDayPrefix('', day);
+  const lines = best.lines.map(line => {
+    if (line.confidence >= 60) return line;
+    const alternatives = candidates.filter(candidate => !candidate.warmRows).flatMap(candidate => candidate.lines).filter(other =>
+      Math.abs(other.top - line.top) <= Math.max(8, line.height * 0.5) &&
+      other.confidence >= line.confidence + 20);
+    alternatives.sort((a, b) => b.confidence - a.confidence);
+    return alternatives[0] || line;
+  });
+  // Rescue only rows with measured orange ink; unrelated OCR remains unchanged.
+  for (const candidate of candidates.filter(candidate => candidate.warmRows)) {
+    for (const line of candidate.lines) {
+      if (line.confidence < 80 || !candidate.warmRows.some(y => y >= line.top && y <= line.top + line.height)) continue;
+      const index = lines.findIndex(other => Math.abs(other.top - line.top) <= Math.max(8, line.height * 0.5));
+      if (index < 0) lines.push(line);
+      else if (line.confidence > lines[index].confidence) lines[index] = line;
+    }
+  }
+  lines.sort((a, b) => a.top - b.top);
+  return ensureDayPrefix(cleanupOcrText(lines.map(line => line.text).filter(text => !/^\p{L}$/u.test(text)).join('\n')) || best.text, day);
 }
 
 function normalizeOcrText(text) {
@@ -809,14 +860,14 @@ function levenshteinWithin(a, b, maxDistance) {
   return previous[bLength] <= maxDistance ? previous[bLength] : null;
 }
 
-async function buildFilteredTextFromTsv(tsv, imageBuffer) {
+async function buildFilteredTextFromTsv(tsv, imageBuffer, details = false) {
   if (!tsv) {
-    return '';
+    return details ? [] : '';
   }
 
   const rows = parseTsvRows(tsv);
   if (!rows.length) {
-    return '';
+    return details ? [] : '';
   }
 
   const metadata = await sharp(imageBuffer).metadata();
@@ -839,10 +890,15 @@ async function buildFilteredTextFromTsv(tsv, imageBuffer) {
     .map(words => words.sort((a, b) => a.left - b.left))
     .map(words => filterLineWords(words, imageWidth))
     .filter(words => words.length)
-    .map(words => words.map(word => word.text).join(' ').replace(/\s+([,.)])/g, '$1'))
+    .map(words => ({
+      text: words.map(word => word.text).join(' ').replace(/\s+([,.)])/g, '$1'),
+      top: Math.min(...words.map(word => word.top)),
+      height: Math.max(...words.map(word => word.height)),
+      confidence: words.reduce((sum, word) => sum + Math.max(0, word.conf), 0) / words.length
+    }))
     .filter(Boolean);
 
-  return lines.join('\n');
+  return details ? lines : lines.map(line => line.text).join('\n');
 }
 
 function parseTsvRows(tsv) {
@@ -871,6 +927,7 @@ function filterLineWords(words, imageWidth) {
   const lineHeight = Math.max(...words.map(word => word.height || 0), 0);
   const cleanedWords = words.filter(word => !isVisualDust(word));
 
+  if (cleanedWords.length === 1 && cleanedWords[0].conf < 20 && cleanedWords[0].text.length <= 3 && !isAllowedShortWord(cleanedWords[0].text)) return [];
   return cleanedWords.filter((word, index) => !isLikelyOcrNoise(word, cleanedWords[index - 1], imageWidth, lineHeight));
 }
 
@@ -902,7 +959,10 @@ function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
     word.left >= imageWidth * 0.20 &&
     word.width >= imageWidth * 0.45 &&
     word.left + word.width >= imageWidth * 0.82;
-  const uncertainWordOverLogoBand = lowConfidence && imageWidth > 0 &&
+  const inlineShortWord = isAllowedShortWord(text) && previousWord &&
+    word.left - (previousWord.left + previousWord.width) < imageWidth * 0.035 &&
+    Math.abs((word.top + word.height) - (previousWord.top + previousWord.height)) < lineHeight * 0.4;
+  const uncertainWordOverLogoBand = !inlineShortWord && lowConfidence && imageWidth > 0 &&
     word.left >= imageWidth * 0.65 &&
     word.left + word.width >= imageWidth * 0.85;
   const suspiciousTinyToken = tinyToken && !isAllowedShortWord(text) && /[A-Z0-9|&€#]/.test(text);
@@ -916,7 +976,7 @@ function isLikelyOcrNoise(word, previousWord, imageWidth, lineHeight) {
   const isolatedPeripheralBoundaryNoise = peripheralArea && lowConfidence && boundaryPunctuation && isolatedFromText;
   const peripheralBoundaryNoise = outerContentArea && compactWord && veryLowConfidence && boundaryPunctuation;
 
-  return oversizedPeripheralUncertainWord || uncertainWordOverLogoBand || isolatedRightToken || isolatedPeripheralLowConfidence || isolatedPeripheralBoundaryNoise || peripheralBoundaryNoise || (rightSide && narrowWord && (suspiciousTinyToken || shortHeight));
+  return oversizedPeripheralUncertainWord || uncertainWordOverLogoBand || isolatedRightToken || isolatedPeripheralLowConfidence || isolatedPeripheralBoundaryNoise || peripheralBoundaryNoise || (rightSide && narrowWord && (suspiciousTinyToken || (shortHeight && !isAllowedShortWord(text))));
 }
 
 function isIgnoredLogoFragment(text) {
@@ -1250,4 +1310,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   });
 }
 
-export { removeMenuRules, filterLineWords, loadManualMenus, mergeManualMenus, buildCachedMenu };
+export { preserveWarmText, recognizeDayText, removeMenuRules, filterLineWords, loadManualMenus, mergeManualMenus, buildCachedMenu };
