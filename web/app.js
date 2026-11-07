@@ -265,7 +265,7 @@ function renderHighlightCards() {
   if (!state.highlights.length) {
     return `
       <section class="highlight-section highlight-section--empty" aria-label="Menus à venir">
-        <p class="upcoming-empty">Aucun menu à venir disponible.</p>
+        ${renderMenuEmptyState('Aucun menu à venir disponible.')}
       </section>
     `;
   }
@@ -296,8 +296,8 @@ function renderHighlightCard(highlight, index) {
         </div>
         ${renderDayImageButton(highlight.menu, highlight.day, highlight.date, `highlight-${highlight.menu.mondayDate}-${highlight.day}`)}
       </div>
-      ${closed
-        ? ''
+      ${closed || !lines.length
+        ? renderMenuEmptyState(closed ? 'Pas de cantine aujourd’hui.' : 'Menu non renseigné.')
         : `<ul class="summary-list">
             ${lines.length ? lines.map(line => `<li>${formatMenuLine(line)}</li>`).join('') : '<li>Menu non renseigné.</li>'}
           </ul>`}
@@ -329,8 +329,8 @@ function renderDayMenu(menu, day, sectionId) {
         </div>
       </header>
 
-      ${closed && !contentLines.length
-        ? ''
+      ${closed || !contentLines.length
+        ? renderMenuEmptyState(closed ? 'Pas de cantine aujourd’hui.' : 'Menu non renseigné.')
         : renderMenuLines(contentLines)}
     </article>
   `;
@@ -359,6 +359,13 @@ function getDayStatus(lines, closed) {
     return lines.find(isClosedLine) || 'Fermé';
   }
   return lines.find(isMetaLine) || '';
+}
+
+function renderMenuEmptyState(message) {
+  return `<div class="menu-empty-state">
+    <img src="menu-empty.svg" alt="" width="96" height="96" aria-hidden="true">
+    <p>${escapeHtml(message)}</p>
+  </div>`;
 }
 
 function renderMenuLines(lines) {
@@ -439,6 +446,7 @@ function renderEmpty(payload) {
     : 'Aucune mise à jour disponible';
   app.innerHTML = `
     <section class="empty-panel">
+      <img class="empty-panel-illustration" src="menu-empty.svg" alt="" width="96" height="96" aria-hidden="true">
       <h2>Aucun menu disponible</h2>
       <p>Le fichier de données est chargé, mais il ne contient aucune semaine.</p>
     </section>

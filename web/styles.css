@@ -771,3 +771,27 @@ h1 {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* The supplied illustration marks days without a menu. */
+.menu-empty-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 16px;
+  min-height: 210px;
+  padding: 28px 20px;
+  text-align: center;
+}
+.menu-empty-state img,
+.empty-panel-illustration {
+  display: block;
+  width: 96px;
+  height: 96px;
+}
+.menu-empty-state p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.summary-card .menu-empty-state { padding-bottom: 8px; }
+.empty-panel-illustration { margin-bottom: 20px; }
