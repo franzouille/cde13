@@ -793,5 +793,10 @@ h1 {
   font-size: 14px;
   line-height: 1.45;
 }
-.summary-card .menu-empty-state { padding-bottom: 8px; }
+.summary-card:has(> .menu-empty-state),
+.menu-card:has(> .menu-empty-state) {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+.summary-card .menu-empty-state { padding-block: 24px; }
 .empty-panel-illustration { margin-bottom: 20px; }
